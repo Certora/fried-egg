@@ -12,6 +12,7 @@ mod statement;
 
 pub type EGraph = egg::EGraph<TAC, TacAnalysis>;
 
+// NOTE: this should be "freshness" perhaps. Oldest vars have least age.
 static AGE: Lazy<Mutex<usize>> = Lazy::new(|| {
     let age: usize = 1;
     Mutex::new(age)
@@ -80,10 +81,6 @@ impl egg::CostFunction<TAC> for RHSCostFn {
         C: FnMut(Id) -> Self::Cost,
     {
         let op_cost = match enode {
-            TAC::Num(_) => 1,
-            TAC::Add(_) => 1,
-            TAC::Sub(_) => 1,
-            TAC::Mul(_) => 1,
             TAC::Var(v) => {
                 if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
                     1
@@ -123,7 +120,7 @@ impl Analysis<TAC> for TacAnalysis {
                 age = Some(0);
             },
             TAC::Bool(_) => {
-                constant = None;
+                constant = None; // TODO: should change this to fold bools too
                 age = Some(0);
             },
             TAC::Add([a, b]) => {
@@ -260,9 +257,14 @@ impl TacOptimizer {
         let mut roots = vec![];
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
-        for b in block_assgns {
+        for b in &block_assgns {
             let id_l = self.egraph.add_expr(&b.lhs);
+            // let mut id_r: Id = id_l;
+            assert!(b.rhs.as_ref().len() > 0, "RHS of this assignment is empty!");
             let id_r = self.egraph.add_expr(&b.rhs);
+            // if b.rhs.as_ref()[0] != TAC::Havoc {
+            //     id_r = self.egraph.add_expr(&b.rhs);
+            // }
             let (id, _) = self.egraph.union(id_l, id_r);
             roots.push(id);
         }
@@ -275,25 +277,26 @@ impl TacOptimizer {
             .with_node_limit(self.params.eqsat_node_limit)
             .with_scheduler(egg::SimpleScheduler);
         // runner.roots = ids(&runner.egraph);
-        runner.roots = roots;
+        runner.roots = roots.clone();
         runner = runner.run(&rules());
         runner.egraph.rebuild();
 
-        let mut extract_left = Extractor::new(&runner.egraph, LHSCostFn);
-
-        println!("{:?}", AGE_MAP);
-        for id in ids(&runner.egraph) {
-            let (_, best_l) = extract_left.find_best(id);
-            match best_l.as_ref() {
-                [TAC::Var(vl)] => {
-                    let vl_age = AGE_MAP.lock().unwrap().get(vl).unwrap().clone();
+        let mut c = 0;
+        for id in roots {
+            // simply get lhs from the assignments
+            let best_l = &block_assgns[c].lhs;
+            assert!(best_l.as_ref().len() == 1);
+            match best_l.as_ref()[0] {
+                TAC::Var(vl) => {
+                    let vl_age = AGE_MAP.lock().unwrap().get(&vl).unwrap().clone();
                     let mut extract_right =
                         Extractor::new(&runner.egraph, RHSCostFn { age_limit: vl_age });
                     let (_, best_r) = extract_right.find_best(id);
                     println!("{} := {}", best_l, best_r);
                 }
-                _ => (),
+                _ => ()
             }
+            c = c + 1;
         }
     }
 }
