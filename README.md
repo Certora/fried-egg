@@ -7,7 +7,6 @@
 # Getting Fried-egg to work with CVT
 There's a few things I had to do to get Fried-egg composed with CVT.
 
-
 ## On the rust side
 First off, we don't want to spawn sub-processes for each call to Fried-egg because that can be inefficient for larger programs since there will likely be many calls.
 So we decided to go with a shared library approach using [UNIFFI](https://mozilla.github.io/uniffi-rs/Overview.html).
