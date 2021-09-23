@@ -4,8 +4,8 @@ use egg::*;
 
 // TODO: will need expr since a block can have other assume etc.
 #[derive(Clone, Serialize, Deserialize, Debug)]
-#[serde(from = "StringStmt")]
-#[serde(into = "StringStmt")]
+#[serde(from = "EggAssign")]
+#[serde(into = "EggAssign")]
 #[serde(bound = "L: egg::Language")]
 pub struct Stmt<L> {
     pub lhs: RecExpr<L>,
@@ -13,20 +13,20 @@ pub struct Stmt<L> {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
-pub struct StringStmt {
+pub struct EggAssign {
     pub lhs: String,
     pub rhs: String
 }
 
-impl<L: egg::Language> From<StringStmt> for Stmt<L> {
-    fn from(s: StringStmt) -> Self {
+impl<L: egg::Language> From<EggAssign> for Stmt<L> {
+    fn from(s: EggAssign) -> Self {
         let lhs: RecExpr<L> = s.lhs.parse().unwrap();
         let rhs: RecExpr<L> = s.rhs.parse().unwrap();
         Self::new(lhs, rhs)
     }
 }
 
-impl<L: egg::Language> From<Stmt<L>> for StringStmt {
+impl<L: egg::Language> From<Stmt<L>> for EggAssign {
     fn from(s: Stmt<L>) -> Self {
         Self {
             lhs: s.lhs.to_string(),
