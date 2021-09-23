@@ -1,0 +1,8 @@
+namespace tac_optimizer {
+    void start(sequence<EggAssign> ss);
+};
+
+dictionary EggAssign {
+    string lhs;
+    string rhs;
+};
