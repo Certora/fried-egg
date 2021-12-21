@@ -1,5 +1,5 @@
 namespace tac_optimizer {
-    void start(sequence<EggAssign> ss);
+    sequence<EggAssign> start(sequence<EggAssign> ss);
 };
 
 dictionary EggAssign {

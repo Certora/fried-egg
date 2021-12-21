@@ -15,7 +15,7 @@ uniffi::assert_compatible_version!("0.14.0"); // Please check that you depend on
 /// or by passing ownership of the buffer back into Rust code.
 #[doc(hidden)]
 #[no_mangle]
-pub extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_alloc(
+pub extern "C" fn ffi_tac_optimizer_f0b7_rustbuffer_alloc(
     size: i32,
     call_status: &mut uniffi::RustCallStatus,
 ) -> uniffi::RustBuffer {
@@ -34,7 +34,7 @@ pub extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_alloc(
 /// make sure the `ForeignBytes` struct contains a valid pointer and length.
 #[doc(hidden)]
 #[no_mangle]
-pub unsafe extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_from_bytes(
+pub unsafe extern "C" fn ffi_tac_optimizer_f0b7_rustbuffer_from_bytes(
     bytes: uniffi::ForeignBytes,
     call_status: &mut uniffi::RustCallStatus,
 ) -> uniffi::RustBuffer {
@@ -52,7 +52,7 @@ pub unsafe extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_from_bytes(
 /// corrupting the allocator state.
 #[doc(hidden)]
 #[no_mangle]
-pub unsafe extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_free(
+pub unsafe extern "C" fn ffi_tac_optimizer_f0b7_rustbuffer_free(
     buf: uniffi::RustBuffer,
     call_status: &mut uniffi::RustCallStatus,
 ) {
@@ -76,7 +76,7 @@ pub unsafe extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_free(
 /// corrupting the allocator state.
 #[doc(hidden)]
 #[no_mangle]
-pub unsafe extern "C" fn ffi_tac_optimizer_d4ce_rustbuffer_reserve(
+pub unsafe extern "C" fn ffi_tac_optimizer_f0b7_rustbuffer_reserve(
     buf: uniffi::RustBuffer,
     additional: i32,
     call_status: &mut uniffi::RustCallStatus,
@@ -123,19 +123,19 @@ impl uniffi::RustBufferFfiConverter for FfiConverterTypeEggAssign {
 
 #[doc(hidden)]
 #[no_mangle]
-pub extern "C" fn tac_optimizer_d4ce_start(
+pub extern "C" fn tac_optimizer_f0b7_start(
     ss: uniffi::RustBuffer,
     call_status: &mut uniffi::RustCallStatus,
-) {
+) -> uniffi::RustBuffer {
     // If the provided function does not match the signature specified in the UDL
     // then this attempt to call it will not compile, and will give guidance as to why.
-    uniffi::deps::log::debug!("tac_optimizer_d4ce_start");
+    uniffi::deps::log::debug!("tac_optimizer_f0b7_start");
 
     uniffi::call_with_output(call_status, || {
-        start(
+        <std::vec::Vec<FfiConverterTypeEggAssign> as uniffi::FfiConverter>::lower(start(
             <std::vec::Vec<FfiConverterTypeEggAssign> as uniffi::FfiConverter>::try_lift(ss)
                 .unwrap(),
-        )
+        ))
     })
 }
 // Object definitions, corresponding to UDL `interface` definitions.

@@ -44,15 +44,15 @@ open class RustBuffer : Structure() {
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_tac_optimizer_d4ce_rustbuffer_alloc(size, status)
+            _UniFFILib.INSTANCE.ffi_tac_optimizer_f0b7_rustbuffer_alloc(size, status)
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_tac_optimizer_d4ce_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_tac_optimizer_f0b7_rustbuffer_free(buf, status)
         }
 
         internal fun reserve(buf: RustBuffer.ByValue, additional: Int) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_tac_optimizer_d4ce_rustbuffer_reserve(buf, additional, status)
+            _UniFFILib.INSTANCE.ffi_tac_optimizer_f0b7_rustbuffer_reserve(buf, additional, status)
         }
     }
 
@@ -314,23 +314,23 @@ internal interface _UniFFILib : Library {
         }
     }
 
-    fun tac_optimizer_d4ce_start(ss: RustBuffer.ByValue,
-    uniffi_out_err: RustCallStatus
-    ): Unit
-
-    fun ffi_tac_optimizer_d4ce_rustbuffer_alloc(size: Int,
+    fun tac_optimizer_f0b7_start(ss: RustBuffer.ByValue,
     uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_tac_optimizer_d4ce_rustbuffer_from_bytes(bytes: ForeignBytes.ByValue,
+    fun ffi_tac_optimizer_f0b7_rustbuffer_alloc(size: Int,
     uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_tac_optimizer_d4ce_rustbuffer_free(buf: RustBuffer.ByValue,
+    fun ffi_tac_optimizer_f0b7_rustbuffer_from_bytes(bytes: ForeignBytes.ByValue,
+    uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_tac_optimizer_f0b7_rustbuffer_free(buf: RustBuffer.ByValue,
     uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun ffi_tac_optimizer_d4ce_rustbuffer_reserve(buf: RustBuffer.ByValue,additional: Int,
+    fun ffi_tac_optimizer_f0b7_rustbuffer_reserve(buf: RustBuffer.ByValue,additional: Int,
     uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
@@ -453,10 +453,12 @@ data class EggAssign (
 
 
 
-fun start(ss: List<EggAssign> ) =
-    
+fun start(ss: List<EggAssign> ): List<EggAssign> {
+    val _retval = 
     rustCall() { status ->
-    _UniFFILib.INSTANCE.tac_optimizer_d4ce_start(lowerSequenceTypeEggAssign(ss) ,status)
+    _UniFFILib.INSTANCE.tac_optimizer_f0b7_start(lowerSequenceTypeEggAssign(ss) ,status)
+}
+    return liftSequenceTypeEggAssign(_retval)
 }
 
 
