@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::Parser;
 use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
@@ -23,14 +23,14 @@ static AGE_MAP: Lazy<Mutex<HashMap<Symbol, usize>>> = Lazy::new(|| {
     Mutex::new(age_map)
 });
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(rename_all = "kebab-case")]
 pub enum Command {
     // only one command for now
     Optimize(OptParams),
 }
 
-#[derive(Serialize, Deserialize, Clap, Default)]
+#[derive(Serialize, Deserialize, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub struct OptParams {
     ////////////////

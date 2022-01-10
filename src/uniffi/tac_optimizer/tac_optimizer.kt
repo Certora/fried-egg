@@ -21,14 +21,11 @@ import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
+import com.sun.jna.ptr.ByReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 
+// The Rust Buffer and 3 templated methods (alloc, free, reserve).
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
 // pointer to the underlying data.
@@ -44,15 +41,19 @@ open class RustBuffer : Structure() {
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_tac_optimizer_f0b7_rustbuffer_alloc(size, status)
+            _UniFFILib.INSTANCE.ffi_tac_optimizer_26fd_rustbuffer_alloc(size, status).also {
+                if(it.data == null) {
+                   throw RuntimeException("RustBuffer.alloc() returned null data pointer (size=${size})")
+               }
+            }
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_tac_optimizer_f0b7_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_tac_optimizer_26fd_rustbuffer_free(buf, status)
         }
 
         internal fun reserve(buf: RustBuffer.ByValue, additional: Int) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_tac_optimizer_f0b7_rustbuffer_reserve(buf, additional, status)
+            _UniFFILib.INSTANCE.ffi_tac_optimizer_26fd_rustbuffer_reserve(buf, additional, status)
         }
     }
 
@@ -61,6 +62,25 @@ open class RustBuffer : Structure() {
         this.data?.getByteBuffer(0, this.len.toLong())?.also {
             it.order(ByteOrder.BIG_ENDIAN)
         }
+}
+
+/**
+ * The equivalent of the `*mut RustBuffer` type.
+ * Required for callbacks taking in an out pointer.
+ *
+ * Size is the sum of all values in the struct.
+ */
+class RustBufferByReference : ByReference(16) {
+    /**
+     * Set the pointed-to `RustBuffer` to the given value.
+     */
+    fun setValue(value: RustBuffer.ByValue) {
+        // NOTE: The offsets are as they are in the C-like struct.
+        val pointer = getPointer()
+        pointer.setInt(0, value.capacity)
+        pointer.setInt(4, value.len)
+        pointer.setPointer(8, value.data)
+    }
 }
 
 // This is a helper for safely passing byte references into the rust code.
@@ -114,8 +134,12 @@ class RustBufferBuilder() {
     }
 
     fun discard() {
-        val rbuf = this.finalize()
-        RustBuffer.free(rbuf)
+        if(this.rbuf.data != null) {
+            // Free the current `RustBuffer`
+            RustBuffer.free(this.rbuf)
+            // Replace it with an empty RustBuffer.
+            this.setRustBuffer(RustBuffer.ByValue())
+        }
     }
 
     internal fun reserve(size: Int, write: (ByteBuffer) -> Unit) {
@@ -175,7 +199,6 @@ class RustBufferBuilder() {
 }
 
 // Helpers for reading primitive data types from a bytebuffer.
-
 internal fun<T> liftFromRustBuffer(rbuf: RustBuffer.ByValue, readItem: (ByteBuffer) -> T): T {
     val buf = rbuf.asByteBuffer()!!
     try {
@@ -201,154 +224,9 @@ internal fun<T> lowerIntoRustBuffer(v: T, writeItem: (T, RustBufferBuilder) -> U
     }
 }
 
-// For every type used in the interface, we provide helper methods for conveniently
-// lifting and lowering that type from C-compatible data, and for reading and writing
-// values of that type in a buffer.
-
-
-
-
-internal fun String.Companion.lift(rbuf: RustBuffer.ByValue): String {
-    try {
-        val byteArr = ByteArray(rbuf.len)
-        rbuf.asByteBuffer()!!.get(byteArr)
-        return byteArr.toString(Charsets.UTF_8)
-    } finally {
-        RustBuffer.free(rbuf)
-    }
-}
-
-internal fun String.Companion.read(buf: ByteBuffer): String {
-    val len = buf.getInt()
-    val byteArr = ByteArray(len)
-    buf.get(byteArr)
-    return byteArr.toString(Charsets.UTF_8)
-}
-
-internal fun String.lower(): RustBuffer.ByValue {
-    val byteArr = this.toByteArray(Charsets.UTF_8)
-    // Ideally we'd pass these bytes to `ffi_bytebuffer_from_bytes`, but doing so would require us
-    // to copy them into a JNA `Memory`. So we might as well directly copy them into a `RustBuffer`.
-    val rbuf = RustBuffer.alloc(byteArr.size)
-    rbuf.asByteBuffer()!!.put(byteArr)
-    return rbuf
-}
-
-internal fun String.write(buf: RustBufferBuilder) {
-    val byteArr = this.toByteArray(Charsets.UTF_8)
-    buf.putInt(byteArr.size)
-    buf.put(byteArr)
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Helper functions for pasing values of type List<EggAssign>
-
-
-internal fun liftSequenceTypeEggAssign(rbuf: RustBuffer.ByValue): List<EggAssign> {
-    return liftFromRustBuffer(rbuf) { buf ->
-        readSequenceTypeEggAssign(buf)
-    }
-}
-
-
-internal fun readSequenceTypeEggAssign(buf: ByteBuffer): List<EggAssign> {
-    val len = buf.getInt()
-    return List<EggAssign>(len) {
-        EggAssign.read(buf)
-    }
-}
-
-
-internal fun lowerSequenceTypeEggAssign(v: List<EggAssign>): RustBuffer.ByValue {
-    return lowerIntoRustBuffer(v) { v, buf ->
-        writeSequenceTypeEggAssign(v, buf)
-    }
-}
-
-
-internal fun writeSequenceTypeEggAssign(v: List<EggAssign>, buf: RustBufferBuilder) {
-    buf.putInt(v.size)
-    v.forEach {
-        it.write(buf)
-    }
-}
-
-
-
-
-@Synchronized
-fun findLibraryName(componentName: String): String {
-    val libOverride = System.getProperty("uniffi.component.${componentName}.libraryOverride")
-    if (libOverride != null) {
-        return libOverride
-    }
-    return "uniffi_tac_optimizer"
-}
-
-inline fun <reified Lib : Library> loadIndirect(
-    componentName: String
-): Lib {
-    return Native.load<Lib>(findLibraryName(componentName), Lib::class.java)
-}
-
-// A JNA Library to expose the extern-C FFI definitions.
-// This is an implementation detail which will be called internally by the public API.
-
-internal interface _UniFFILib : Library {
-    companion object {
-        internal val INSTANCE: _UniFFILib by lazy { 
-            loadIndirect<_UniFFILib>(componentName = "tac_optimizer")
-            
-            
-        }
-    }
-
-    fun tac_optimizer_f0b7_start(ss: RustBuffer.ByValue,
-    uniffi_out_err: RustCallStatus
-    ): RustBuffer.ByValue
-
-    fun ffi_tac_optimizer_f0b7_rustbuffer_alloc(size: Int,
-    uniffi_out_err: RustCallStatus
-    ): RustBuffer.ByValue
-
-    fun ffi_tac_optimizer_f0b7_rustbuffer_from_bytes(bytes: ForeignBytes.ByValue,
-    uniffi_out_err: RustCallStatus
-    ): RustBuffer.ByValue
-
-    fun ffi_tac_optimizer_f0b7_rustbuffer_free(buf: RustBuffer.ByValue,
-    uniffi_out_err: RustCallStatus
-    ): Unit
-
-    fun ffi_tac_optimizer_f0b7_rustbuffer_reserve(buf: RustBuffer.ByValue,additional: Int,
-    uniffi_out_err: RustCallStatus
-    ): RustBuffer.ByValue
-
-    
-}
-
 // A handful of classes and functions to support the generated data structures.
 // This would be a good candidate for isolating in its own ffi-support lib.
-
-
-
-
-
-
-
-// Public interface members begin here.
-// Public facing enums
-// Error definitions
+// Error runtime.
 @Structure.FieldOrder("code", "error_buf")
 internal open class RustCallStatus : Structure() {
     @JvmField var code: Int = 0
@@ -413,7 +291,70 @@ private inline fun <U> rustCall(callback: (RustCallStatus) -> U): U {
     return rustCallWithError(NullCallStatusErrorHandler, callback);
 }
 
-// Public facing records
+// Contains loading, initialization code,
+// and the FFI Function declarations in a com.sun.jna.Library.
+@Synchronized
+private fun findLibraryName(componentName: String): String {
+    val libOverride = System.getProperty("uniffi.component.$componentName.libraryOverride")
+    if (libOverride != null) {
+        return libOverride
+    }
+    return "uniffi_tac_optimizer"
+}
+
+private inline fun <reified Lib : Library> loadIndirect(
+    componentName: String
+): Lib {
+    return Native.load<Lib>(findLibraryName(componentName), Lib::class.java)
+}
+
+// A JNA Library to expose the extern-C FFI definitions.
+// This is an implementation detail which will be called internally by the public API.
+
+internal interface _UniFFILib : Library {
+    companion object {
+        internal val INSTANCE: _UniFFILib by lazy {
+            loadIndirect<_UniFFILib>(componentName = "tac_optimizer")
+            
+            
+        }
+    }
+
+    fun tac_optimizer_26fd_start(ss: RustBuffer.ByValue,
+    uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_tac_optimizer_26fd_rustbuffer_alloc(size: Int,
+    uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_tac_optimizer_26fd_rustbuffer_from_bytes(bytes: ForeignBytes.ByValue,
+    uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_tac_optimizer_26fd_rustbuffer_free(buf: RustBuffer.ByValue,
+    uniffi_out_err: RustCallStatus
+    ): Unit
+
+    fun ffi_tac_optimizer_26fd_rustbuffer_reserve(buf: RustBuffer.ByValue,additional: Int,
+    uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    
+}
+
+// Public interface members begin here.
+
+
+
+fun start(ss: List<EggAssign> ): List<EggAssign> {
+    val _retval = 
+    rustCall() { status ->
+    _UniFFILib.INSTANCE.tac_optimizer_26fd_start(lowerSequenceRecordEggAssign(ss) ,status)
+}
+    return liftSequenceRecordEggAssign(_retval)
+}
+
 
 data class EggAssign (
     var lhs: String, 
@@ -446,26 +387,64 @@ data class EggAssign (
     
     
 }
-
-
-// Namespace functions
-
-
-
-
-fun start(ss: List<EggAssign> ): List<EggAssign> {
-    val _retval = 
-    rustCall() { status ->
-    _UniFFILib.INSTANCE.tac_optimizer_f0b7_start(lowerSequenceTypeEggAssign(ss) ,status)
-}
-    return liftSequenceTypeEggAssign(_retval)
+internal fun String.Companion.lift(rbuf: RustBuffer.ByValue): String {
+    try {
+        val byteArr = ByteArray(rbuf.len)
+        rbuf.asByteBuffer()!!.get(byteArr)
+        return byteArr.toString(Charsets.UTF_8)
+    } finally {
+        RustBuffer.free(rbuf)
+    }
 }
 
+internal fun String.Companion.read(buf: ByteBuffer): String {
+    val len = buf.getInt()
+    val byteArr = ByteArray(len)
+    buf.get(byteArr)
+    return byteArr.toString(Charsets.UTF_8)
+}
+
+internal fun String.lower(): RustBuffer.ByValue {
+    val byteArr = this.toByteArray(Charsets.UTF_8)
+    // Ideally we'd pass these bytes to `ffi_bytebuffer_from_bytes`, but doing so would require us
+    // to copy them into a JNA `Memory`. So we might as well directly copy them into a `RustBuffer`.
+    val rbuf = RustBuffer.alloc(byteArr.size)
+    rbuf.asByteBuffer()!!.put(byteArr)
+    return rbuf
+}
+
+internal fun String.write(buf: RustBufferBuilder) {
+    val byteArr = this.toByteArray(Charsets.UTF_8)
+    buf.putInt(byteArr.size)
+    buf.put(byteArr)
+}
+// Helper code for EggAssign record is found in RecordTemplate.kt
 
 
-// Objects
+// Helper functions for passing values of type List<EggAssign>
+internal fun lowerSequenceRecordEggAssign(v: List<EggAssign>): RustBuffer.ByValue {
+    return lowerIntoRustBuffer(v) { v, buf ->
+        writeSequenceRecordEggAssign(v, buf)
+    }
+}
 
+internal fun writeSequenceRecordEggAssign(v: List<EggAssign>, buf: RustBufferBuilder) {
+    buf.putInt(v.size)
+    v.forEach {
+        it.write(buf)
+    }
+}
 
-// Callback Interfaces
+internal fun liftSequenceRecordEggAssign(rbuf: RustBuffer.ByValue): List<EggAssign> {
+    return liftFromRustBuffer(rbuf) { buf ->
+        readSequenceRecordEggAssign(buf)
+    }
+}
 
+internal fun readSequenceRecordEggAssign(buf: ByteBuffer): List<EggAssign> {
+    val len = buf.getInt()
+    return List<EggAssign>(len) {
+        EggAssign.read(buf)
+    }
+}
 
