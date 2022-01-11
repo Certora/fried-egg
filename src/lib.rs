@@ -1,3 +1,8 @@
+mod logical_equality;
+mod tac;
+mod statement;
+
+
 use clap::Parser;
 use egg::*;
 use once_cell::sync::Lazy;
@@ -5,10 +10,11 @@ use serde::*;
 // use statement::Stmt;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
+use crate::tac::TAC;
+use crate::logical_equality::LogicalEquality;
 
 // use bigint::B256;
 
-mod statement;
 
 pub type EGraph = egg::EGraph<TAC, TacAnalysis>;
 
@@ -46,25 +52,6 @@ pub struct OptParams {
     ////////////////
     // #[clap(long, default_value = "input.json")]
     // pub input: String,
-}
-
-define_language! {
-    pub enum TAC {
-        "+" = Add([Id; 2]),
-        "-" = Sub([Id; 2]),
-        "*" = Mul([Id; 2]),
-        "/" = Div([Id; 2]),
-        "~" = Neg([Id; 1]),
-        ">" = Gt([Id; 2]),
-        "<" = Lt([Id; 2]),
-        ">=" = Ge([Id; 2]),
-        "<=" = Le([Id; 2]),
-        "Havoc" = Havoc, // TODO: not the same thing!
-        Bool(bool),
-        // TODO: this should be 256 bits not 64 bits
-        Num(i64),
-        Var(egg::Symbol),
-    }
 }
 
 pub struct EggAssign {
@@ -297,6 +284,7 @@ fn ids(egraph: &EGraph) -> Vec<egg::Id> {
     egraph.classes().map(|c| c.id).collect()
 }
 
+
 pub struct TacOptimizer {
     params: OptParams,
     egraph: EGraph,
@@ -379,6 +367,11 @@ pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
             
     //     }
     // }
+}
+
+// Logical Equality Entry Point
+pub fn check_eq(lhs: String, rhs: String) -> bool {
+    LogicalEquality::new().run(lhs, rhs)
 }
 
 std::include!("tac_optimizer.uniffi.rs");
