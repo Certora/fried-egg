@@ -1,14 +1,20 @@
-use clap::Clap;
+mod logical_equality;
+mod tac;
+mod statement;
+
+
+use clap::Parser;
 use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
-use statement::Stmt;
+// use statement::Stmt;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
+use crate::tac::TAC;
+use crate::logical_equality::LogicalEquality;
 
 // use bigint::B256;
 
-mod statement;
 
 pub type EGraph = egg::EGraph<TAC, TacAnalysis>;
 
@@ -23,37 +29,36 @@ static AGE_MAP: Lazy<Mutex<HashMap<Symbol, usize>>> = Lazy::new(|| {
     Mutex::new(age_map)
 });
 
-#[derive(Serialize, Deserialize, Clap)]
+#[derive(Parser)]
+#[clap(rename_all = "kebab-case")]
+pub enum Command {
+    // only one command for now
+    Optimize(OptParams),
+}
+
+#[derive(Serialize, Deserialize, Parser, Default)]
 #[clap(rename_all = "kebab-case")]
 pub struct OptParams {
     ////////////////
     // eqsat args //
     ////////////////
     #[clap(long, default_value = "5")]
-    pub eqsat_iter_limit: usize,
+    pub eqsat_iter_limit: u64,
     #[clap(long, default_value = "100000")]
-    pub eqsat_node_limit: usize,
+    pub eqsat_node_limit: u64,
 
     ////////////////
     // block from TAC CFG //
     ////////////////
-    #[clap(long, default_value = "input.json")]
-    pub input: String,
+    // #[clap(long, default_value = "input.json")]
+    // pub input: String,
 }
 
-define_language! {
-    pub enum TAC {
-        "+" = Add([Id; 2]),
-        "-" = Sub([Id; 2]),
-        "*" = Mul([Id; 2]),
-        "~" = Neg([Id; 1]),
-        "Havoc" = Havoc, // TODO: not the same thing!
-        Bool(bool),
-        // TODO: this should be 256 bits not 64 bits
-        Num(i64),
-        Var(egg::Symbol),
-    }
+pub struct EggAssign {
+    pub lhs: String,
+    pub rhs: String
 }
+
 
 pub struct LHSCostFn;
 impl egg::CostFunction<TAC> for LHSCostFn {
@@ -72,6 +77,7 @@ impl egg::CostFunction<TAC> for LHSCostFn {
 
 pub struct RHSCostFn {
     age_limit: usize,
+    lhs: Symbol
 }
 
 impl egg::CostFunction<TAC> for RHSCostFn {
@@ -82,7 +88,10 @@ impl egg::CostFunction<TAC> for RHSCostFn {
     {
         let op_cost = match enode {
             TAC::Var(v) => {
-                if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
+                if v == &self.lhs {
+                    1000
+                } 
+                else if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
                     1
                 } else {
                     100
@@ -97,7 +106,7 @@ impl egg::CostFunction<TAC> for RHSCostFn {
 #[derive(Default, Debug, Clone)]
 pub struct Data {
     constant: Option<i64>,
-    age: Option<usize>
+    age: Option<usize>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -108,58 +117,61 @@ impl Analysis<TAC> for TacAnalysis {
     fn make(egraph: &egg::EGraph<TAC, TacAnalysis>, enode: &TAC) -> Self::Data {
         let ct = |i: &Id| egraph[*i].data.constant;
         let ag = |i: &Id| egraph[*i].data.age;
-        let constant: Option<i64>; 
+        let constant: Option<i64>;
         let age: Option<usize>;
         match enode {
             TAC::Num(c) => {
                 constant = Some(*c);
                 age = Some(0);
-            },
+            }
             TAC::Havoc => {
                 constant = None;
                 age = Some(0);
-            },
+            }
             TAC::Bool(_) => {
                 constant = None; // TODO: should change this to fold bools too
                 age = Some(0);
-            },
+            }
             TAC::Add([a, b]) => {
                 constant = match (ct(a), ct(b)) {
                     (Some(x), Some(y)) => Some(x + y),
-                    (_, _) => None
+                    (_, _) => None,
                 };
                 age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some (max(x, y)),
-                    (_, _) => None
+                    (Some(x), Some(y)) => Some(max(x, y)),
+                    (_, _) => None,
                 };
-            },
+            }
             TAC::Sub([a, b]) => {
                 constant = match (ct(a), ct(b)) {
                     (Some(x), Some(y)) => Some(x - y),
-                    (_, _) => None
+                    (_, _) => None,
                 };
                 age = match (ag(a), ag(b)) {
                     (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None
+                    (_, _) => None,
                 };
-            },
+            }
             TAC::Mul([a, b]) => {
                 constant = match (ct(a), ct(b)) {
                     (Some(x), Some(y)) => Some(x * y),
-                    (_, _) => None
+                    (_, _) => None,
                 };
                 age = match (ag(a), ag(b)) {
                     (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None
+                    (_, _) => None,
                 };
-            },
-            TAC::Neg([a]) => {
-                constant = match ct(a) {
-                    Some(x) => Some(-x),
-                    _ => None
+            }
+            TAC::Div([a, b]) => {
+                constant = match (ct(a), ct(b)) {
+                    (Some(x), Some(y)) => Some(x / y),
+                    (_, _) => None,
                 };
-                age = ag(a);
-            },
+                age = match (ag(a), ag(b)) {
+                    (Some(x), Some(y)) => Some(max(x, y)),
+                    (_, _) => None,
+                };
+            }
             TAC::Var(v) => {
                 constant = None;
                 age = {
@@ -169,8 +181,40 @@ impl Analysis<TAC> for TacAnalysis {
                     Some(a)
                 };
             }
+            TAC::Lt([a, b]) => {
+                constant = None; // TODO: should change this to fold bools too
+                age = match (ag(a), ag(b)) {
+                    (Some(x), Some(y)) => Some(max(x, y)),
+                    (_, _) => None,
+                };
+            }
+            TAC::Gt([a, b]) => {
+                constant = None; // TODO: should change this to fold bools too
+                age = match (ag(a), ag(b)) {
+                    (Some(x), Some(y)) => Some(max(x, y)),
+                    (_, _) => None,
+                };
+            }
+            TAC::Le([a, b]) => {
+                constant = None; // TODO: should change this to fold bools too
+                age = match (ag(a), ag(b)) {
+                    (Some(x), Some(y)) => Some(max(x, y)),
+                    (_, _) => None,
+                };
+            }
+            TAC::Ge([a, b]) => {
+                constant = None; // TODO: should change this to fold bools too
+                age = match (ag(a), ag(b)) {
+                    (Some(x), Some(y)) => Some(max(x, y)),
+                    (_, _) => None,
+                };
+            }
+            _ => {
+                constant = None;
+                age = None;
+            }
         }
-        Data{constant, age}
+        Data { constant, age }
     }
 
     fn merge(&self, to: &mut Self::Data, from: Self::Data) -> bool {
@@ -178,7 +222,7 @@ impl Analysis<TAC> for TacAnalysis {
             (None, Some(b)) => to.constant = Some(b.clone()),
             (None, None) => (),
             (Some(_), None) => (),
-            (Some(a), Some(b)) => assert_eq!(a, b), 
+            (Some(a), Some(b)) => assert_eq!(a, b),
         }
         match (to.age, from.age) {
             (None, Some(b)) => to.age = Some(b.clone()),
@@ -193,6 +237,7 @@ impl Analysis<TAC> for TacAnalysis {
     }
 
     // We don't modify the eclass based on variable age.
+    // Just add the constants we get from constant folding.
     fn modify(egraph: &mut EGraph, id: Id) {
         let class = &mut egraph[id];
         if let Some(c) = class.data.constant {
@@ -203,8 +248,6 @@ impl Analysis<TAC> for TacAnalysis {
                 "empty eclass! {:#?}",
                 egraph[id]
             );
-            #[cfg(debug_assertions)]
-            egraph[id].assert_unique_leaves();
         }
     }
 }
@@ -238,6 +281,7 @@ fn ids(egraph: &EGraph) -> Vec<egg::Id> {
     egraph.classes().map(|c| c.id).collect()
 }
 
+
 pub struct TacOptimizer {
     params: OptParams,
     egraph: EGraph,
@@ -252,16 +296,16 @@ impl TacOptimizer {
         optimizer
     }
 
-    pub fn run(mut self) {
-        let block_assgns: Vec<Stmt<TAC>> = statement::parse(&self.params.input);
+    pub fn run(mut self, block_assgns: Vec<EggAssign>) -> Vec<EggAssign> {
         let mut roots = vec![];
+        let mut res = vec![];
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
         for b in &block_assgns {
-            let id_l = self.egraph.add_expr(&b.lhs);
+            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());
             // let mut id_r: Id = id_l;
-            assert!(b.rhs.as_ref().len() > 0, "RHS of this assignment is empty!");
-            let id_r = self.egraph.add_expr(&b.rhs);
+            assert!(b.rhs.len() > 0, "RHS of this assignment is empty!");
+            let id_r = self.egraph.add_expr(&b.rhs.parse().unwrap());
             // if b.rhs.as_ref()[0] != TAC::Havoc {
             //     id_r = self.egraph.add_expr(&b.rhs);
             // }
@@ -273,8 +317,8 @@ impl TacOptimizer {
         // run eqsat with the domain rules
         let mut runner: Runner<TAC, TacAnalysis> = Runner::new(self.egraph.analysis.clone())
             .with_egraph(self.egraph)
-            .with_iter_limit(self.params.eqsat_iter_limit)
-            .with_node_limit(self.params.eqsat_node_limit)
+            .with_iter_limit(self.params.eqsat_iter_limit as usize)
+            .with_node_limit(self.params.eqsat_node_limit as usize)
             .with_scheduler(egg::SimpleScheduler);
         // runner.roots = ids(&runner.egraph);
         runner.roots = roots.clone();
@@ -284,19 +328,103 @@ impl TacOptimizer {
         let mut c = 0;
         for id in roots {
             // simply get lhs from the assignments
-            let best_l = &block_assgns[c].lhs;
-            assert!(best_l.as_ref().len() == 1);
+            let best_l: &RecExpr<TAC> = &block_assgns[c].lhs.parse().unwrap();
+            // TODO: check that this is indeed a var.
             match best_l.as_ref()[0] {
                 TAC::Var(vl) => {
                     let vl_age = AGE_MAP.lock().unwrap().get(&vl).unwrap().clone();
                     let mut extract_right =
-                        Extractor::new(&runner.egraph, RHSCostFn { age_limit: vl_age });
+                        Extractor::new(&runner.egraph, RHSCostFn { age_limit: vl_age , lhs: vl});
                     let (_, best_r) = extract_right.find_best(id);
-                    println!("{} := {}", best_l, best_r);
+                    let assg = EggAssign {
+                        lhs: best_l.to_string(),
+                        rhs: best_r.to_string()
+                    };
+                    res.push(assg);
                 }
-                _ => ()
+                _ => (),
             }
             c = c + 1;
+        }
+        return res
+    }
+}
+
+// Entry point
+pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
+    let params: OptParams = Default::default();
+    let res = TacOptimizer::new(params).run(ss);
+    return res
+    // let _ = env_logger::builder().try_init();
+    
+    // match Command::parse() {
+    //     Command::Optimize(params) => {
+    //         let opt = TacOptimizer::new(params);
+    //         opt.run()
+            
+    //     }
+    // }
+}
+
+// Logical Equality Entry Point
+pub fn check_eq(lhs: String, rhs: String) -> bool {
+    LogicalEquality::new().run(lhs, rhs)
+}
+
+std::include!("tac_optimizer.uniffi.rs");
+
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn test1() {
+        let params = Default::default();
+        let opt = crate::TacOptimizer::new(params);
+        let input = vec![
+            EggAssign{lhs: "R194".to_string(), rhs: "64".to_string()},
+            EggAssign{lhs: "R198".to_string(), rhs: "(+ 32 R194)".to_string()},
+            EggAssign{lhs: "R202".to_string(), rhs: "(- R198 R194)".to_string()}
+        ];
+        let res = opt.run(input);
+        for r in res {
+            println!("{} = {}", r.lhs, r.rhs);
+        }
+    }
+
+    #[test]
+    fn test2() {
+        let params = Default::default();
+        let opt = crate::TacOptimizer::new(params);
+        let input = vec![
+            EggAssign{lhs: "x2".to_string(), rhs: "Havoc".to_string()},
+            EggAssign{lhs: "x1".to_string(), rhs: "(+ x2 96)".to_string()},
+            EggAssign{lhs: "x3".to_string(), rhs: "(- x1 32)".to_string()},
+            EggAssign{lhs: "x4".to_string(), rhs: "(- x3 x2)".to_string()}
+        ];
+        let res = opt.run(input);
+        for r in res {
+            println!("{} = {}", r.lhs, r.rhs);
+        }
+    }
+
+
+    #[test]
+    fn test3() {
+        let params = Default::default();
+        let opt = crate::TacOptimizer::new(params);
+        let input = vec![
+            EggAssign{lhs: "R11".to_string(), rhs: "0".to_string()},
+            EggAssign{lhs: "R13".to_string(), rhs: "0".to_string()},
+            EggAssign{lhs: "lastHasThrown".to_string(), rhs: "0".to_string()},
+            EggAssign{lhs: "lastReverted".to_string(), rhs: "1".to_string()},
+            EggAssign{lhs: "R7".to_string(), rhs: "tacCalldatasize".to_string()},
+            EggAssign{lhs: "B9".to_string(), rhs: "(< R7 4)".to_string()}
+        ];
+        let res = opt.run(input);
+        for r in res {
+            println!("{} = {}", r.lhs, r.rhs);
         }
     }
 }
