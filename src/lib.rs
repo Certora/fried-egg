@@ -1,20 +1,18 @@
 mod logical_equality;
-mod tac;
 mod statement;
-
+mod tac;
 
 use clap::Parser;
 use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
+use crate::logical_equality::LogicalEquality;
+use crate::tac::TAC;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
-use crate::tac::TAC;
-use crate::logical_equality::LogicalEquality;
 
 // use bigint::B256;
-
 
 pub type EGraph = egg::EGraph<TAC, TacAnalysis>;
 
@@ -46,7 +44,6 @@ pub struct OptParams {
     pub eqsat_iter_limit: u64,
     #[clap(long, default_value = "100000")]
     pub eqsat_node_limit: u64,
-
     ////////////////
     // block from TAC CFG //
     ////////////////
@@ -56,9 +53,8 @@ pub struct OptParams {
 
 pub struct EggAssign {
     pub lhs: String,
-    pub rhs: String
+    pub rhs: String,
 }
-
 
 pub struct LHSCostFn;
 impl egg::CostFunction<TAC> for LHSCostFn {
@@ -77,7 +73,7 @@ impl egg::CostFunction<TAC> for LHSCostFn {
 
 pub struct RHSCostFn {
     age_limit: usize,
-    lhs: Symbol
+    lhs: Symbol,
 }
 
 impl egg::CostFunction<TAC> for RHSCostFn {
@@ -90,8 +86,7 @@ impl egg::CostFunction<TAC> for RHSCostFn {
             TAC::Var(v) => {
                 if v == &self.lhs {
                     1000
-                } 
-                else if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
+                } else if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
                     1
                 } else {
                     100
@@ -281,7 +276,6 @@ fn ids(egraph: &EGraph) -> Vec<egg::Id> {
     egraph.classes().map(|c| c.id).collect()
 }
 
-
 pub struct TacOptimizer {
     params: OptParams,
     egraph: EGraph,
@@ -333,12 +327,17 @@ impl TacOptimizer {
             match best_l.as_ref()[0] {
                 TAC::Var(vl) => {
                     let vl_age = AGE_MAP.lock().unwrap().get(&vl).unwrap().clone();
-                    let mut extract_right =
-                        Extractor::new(&runner.egraph, RHSCostFn { age_limit: vl_age , lhs: vl});
+                    let mut extract_right = Extractor::new(
+                        &runner.egraph,
+                        RHSCostFn {
+                            age_limit: vl_age,
+                            lhs: vl,
+                        },
+                    );
                     let (_, best_r) = extract_right.find_best(id);
                     let assg = EggAssign {
                         lhs: best_l.to_string(),
-                        rhs: best_r.to_string()
+                        rhs: best_r.to_string(),
                     };
                     res.push(assg);
                 }
@@ -346,7 +345,7 @@ impl TacOptimizer {
             }
             c = c + 1;
         }
-        return res
+        return res;
     }
 }
 
@@ -354,14 +353,14 @@ impl TacOptimizer {
 pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = Default::default();
     let res = TacOptimizer::new(params).run(ss);
-    return res
+    return res;
     // let _ = env_logger::builder().try_init();
-    
+
     // match Command::parse() {
     //     Command::Optimize(params) => {
     //         let opt = TacOptimizer::new(params);
     //         opt.run()
-            
+
     //     }
     // }
 }
@@ -373,7 +372,6 @@ pub fn check_eq(lhs: String, rhs: String) -> bool {
 
 std::include!("tac_optimizer.uniffi.rs");
 
-
 #[cfg(test)]
 mod tests {
     use crate::*;
@@ -383,9 +381,18 @@ mod tests {
         let params = Default::default();
         let opt = crate::TacOptimizer::new(params);
         let input = vec![
-            EggAssign{lhs: "R194".to_string(), rhs: "64".to_string()},
-            EggAssign{lhs: "R198".to_string(), rhs: "(+ 32 R194)".to_string()},
-            EggAssign{lhs: "R202".to_string(), rhs: "(- R198 R194)".to_string()}
+            EggAssign {
+                lhs: "R194".to_string(),
+                rhs: "64".to_string(),
+            },
+            EggAssign {
+                lhs: "R198".to_string(),
+                rhs: "(+ 32 R194)".to_string(),
+            },
+            EggAssign {
+                lhs: "R202".to_string(),
+                rhs: "(- R198 R194)".to_string(),
+            },
         ];
         let res = opt.run(input);
         for r in res {
@@ -398,10 +405,22 @@ mod tests {
         let params = Default::default();
         let opt = crate::TacOptimizer::new(params);
         let input = vec![
-            EggAssign{lhs: "x2".to_string(), rhs: "Havoc".to_string()},
-            EggAssign{lhs: "x1".to_string(), rhs: "(+ x2 96)".to_string()},
-            EggAssign{lhs: "x3".to_string(), rhs: "(- x1 32)".to_string()},
-            EggAssign{lhs: "x4".to_string(), rhs: "(- x3 x2)".to_string()}
+            EggAssign {
+                lhs: "x2".to_string(),
+                rhs: "Havoc".to_string(),
+            },
+            EggAssign {
+                lhs: "x1".to_string(),
+                rhs: "(+ x2 96)".to_string(),
+            },
+            EggAssign {
+                lhs: "x3".to_string(),
+                rhs: "(- x1 32)".to_string(),
+            },
+            EggAssign {
+                lhs: "x4".to_string(),
+                rhs: "(- x3 x2)".to_string(),
+            },
         ];
         let res = opt.run(input);
         for r in res {
@@ -409,18 +428,35 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test3() {
         let params = Default::default();
         let opt = crate::TacOptimizer::new(params);
         let input = vec![
-            EggAssign{lhs: "R11".to_string(), rhs: "0".to_string()},
-            EggAssign{lhs: "R13".to_string(), rhs: "0".to_string()},
-            EggAssign{lhs: "lastHasThrown".to_string(), rhs: "0".to_string()},
-            EggAssign{lhs: "lastReverted".to_string(), rhs: "1".to_string()},
-            EggAssign{lhs: "R7".to_string(), rhs: "tacCalldatasize".to_string()},
-            EggAssign{lhs: "B9".to_string(), rhs: "(< R7 4)".to_string()}
+            EggAssign {
+                lhs: "R11".to_string(),
+                rhs: "0".to_string(),
+            },
+            EggAssign {
+                lhs: "R13".to_string(),
+                rhs: "0".to_string(),
+            },
+            EggAssign {
+                lhs: "lastHasThrown".to_string(),
+                rhs: "0".to_string(),
+            },
+            EggAssign {
+                lhs: "lastReverted".to_string(),
+                rhs: "1".to_string(),
+            },
+            EggAssign {
+                lhs: "R7".to_string(),
+                rhs: "tacCalldatasize".to_string(),
+            },
+            EggAssign {
+                lhs: "B9".to_string(),
+                rhs: "(< R7 4)".to_string(),
+            },
         ];
         let res = opt.run(input);
         for r in res {

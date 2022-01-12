@@ -1,6 +1,6 @@
-use std::{fs::File};
-use serde::*;
 use egg::*;
+use serde::*;
+use std::fs::File;
 
 // TODO: will need expr since a block can have other assume etc.
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -15,7 +15,7 @@ pub struct Stmt<L> {
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct EggAssign {
     pub lhs: String,
-    pub rhs: String
+    pub rhs: String,
 }
 
 impl<L: egg::Language> From<EggAssign> for Stmt<L> {
@@ -36,11 +36,8 @@ impl<L: egg::Language> From<Stmt<L>> for EggAssign {
 }
 
 impl<L> Stmt<L> {
-    pub fn new (e1: RecExpr<L>, e2: RecExpr<L>) -> Self {
-       Self {
-           lhs: e1,
-           rhs: e2
-       }
+    pub fn new(e1: RecExpr<L>, e2: RecExpr<L>) -> Self {
+        Self { lhs: e1, rhs: e2 }
     }
 }
 

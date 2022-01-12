@@ -26,7 +26,7 @@ define_language! {
 
         "!" = LNot([Id; 1]),
         "~" = BWNot([Id; 1]),
-        
+
         "Havoc" = Havoc, // TODO: not the same thing!
         Bool(bool),
         // TODO: this should be 256 bits not 64 bits
