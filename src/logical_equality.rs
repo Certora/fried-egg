@@ -30,7 +30,6 @@ impl LogicalEquality {
     }
 
     pub fn run(self, lhs: String, rhs: String) -> bool {
-      println!("{} {}", lhs, rhs);
         let mut egraph = EGraph::<TAC, ()>::default();
         let start = egraph.add_expr(&lhs.parse().unwrap());
         let end = egraph.add_expr(&rhs.parse().unwrap());
