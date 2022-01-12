@@ -172,13 +172,6 @@ impl Analysis<TAC> for TacAnalysis {
                     (_, _) => None,
                 };
             }
-            TAC::Neg([a]) => {
-                constant = match ct(a) {
-                    Some(x) => Some(-x),
-                    _ => None,
-                };
-                age = ag(a);
-            }
             TAC::Var(v) => {
                 constant = None;
                 age = {
@@ -215,6 +208,10 @@ impl Analysis<TAC> for TacAnalysis {
                     (Some(x), Some(y)) => Some(max(x, y)),
                     (_, _) => None,
                 };
+            }
+            _ => {
+                constant = None;
+                age = None;
             }
         }
         Data { constant, age }
