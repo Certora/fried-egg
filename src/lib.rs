@@ -9,6 +9,7 @@ use serde::*;
 // use statement::Stmt;
 use crate::logical_equality::LogicalEquality;
 use crate::tac::TAC;
+use primitive_types::U256;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
 
@@ -100,7 +101,7 @@ impl egg::CostFunction<TAC> for RHSCostFn {
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
-    constant: Option<i64>,
+    constant: Option<U256>,
     age: Option<usize>,
 }
 
@@ -112,7 +113,7 @@ impl Analysis<TAC> for TacAnalysis {
     fn make(egraph: &egg::EGraph<TAC, TacAnalysis>, enode: &TAC) -> Self::Data {
         let ct = |i: &Id| egraph[*i].data.constant;
         let ag = |i: &Id| egraph[*i].data.age;
-        let constant: Option<i64>;
+        let constant: Option<U256>;
         let age: Option<usize>;
         match enode {
             TAC::Num(c) => {
@@ -121,10 +122,6 @@ impl Analysis<TAC> for TacAnalysis {
             }
             TAC::Havoc => {
                 constant = None;
-                age = Some(0);
-            }
-            TAC::Bool(_) => {
-                constant = None; // TODO: should change this to fold bools too
                 age = Some(0);
             }
             TAC::Add([a, b]) => {
