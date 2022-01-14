@@ -73,7 +73,7 @@ impl Analysis<TAC> for LogicalAnalysis {
                 for i in 0..CVEC_LEN {
                     let first = child_const.get(0).unwrap_or(&None)
                         .map(|v| *v.get(i).unwrap());
-                    let second = child_const.get(0).unwrap_or(&None)
+                    let second = child_const.get(1).unwrap_or(&None)
                         .map(|v| *v.get(i).unwrap());
                                         
                     cvec.push(eval_tac(enode, first, second))
@@ -129,12 +129,26 @@ impl Analysis<TAC> for LogicalAnalysis {
     }
 }
 
+fn cvec_to_string(cvec: Option<&Vec<U256>>) -> String {
+    match cvec {
+        Some(cvec) => {
+            let mut s = String::new();
+            s.push_str("(");
+            for val in cvec {
+                s.push_str(&format!("{} ", val));
+            }
+            s
+        }
+        None => "()".to_string()
+    }
+}
+
 impl LogicalEquality {
     pub fn new() -> Self {
         Self {}
     }
 
-    pub fn run(self, lhs: String, rhs: String) -> bool {
+    pub fn run(self, lhs: String, rhs: String) -> crate::EqualityResult {
         let mut egraph = EGraph::new(LogicalAnalysis);
         let start = egraph.add_expr(&lhs.parse().unwrap());
         let end = egraph.add_expr(&rhs.parse().unwrap());
@@ -157,10 +171,17 @@ impl LogicalEquality {
                 }
             });
         runner = runner.run(&rules());
-        if runner.egraph.find(start) == runner.egraph.find(end) {
+        let result = if runner.egraph.find(start) == runner.egraph.find(end) {
             true
         } else {
             false
+        };
+        let cvec_left_string = cvec_to_string(runner.egraph[start].data.cvec.as_ref());
+        let cvec_right_string = cvec_to_string(runner.egraph[end].data.cvec.as_ref());
+        return crate::EqualityResult {
+            result,
+            leftv: cvec_left_string,
+            rightv: cvec_right_string,
         }
     }
 }

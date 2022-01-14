@@ -57,6 +57,12 @@ pub struct EggAssign {
     pub rhs: String,
 }
 
+pub struct EqualityResult {
+    pub result: bool,
+    pub leftv: String,
+    pub rightv: String,
+}
+
 pub struct LHSCostFn;
 impl egg::CostFunction<TAC> for LHSCostFn {
     type Cost = usize;
@@ -363,7 +369,7 @@ pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 }
 
 // Logical Equality Entry Point
-pub fn check_eq(lhs: String, rhs: String) -> bool {
+pub fn check_eq(lhs: String, rhs: String) -> EqualityResult {
     LogicalEquality::new().run(lhs, rhs)
 }
 

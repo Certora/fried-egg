@@ -1,6 +1,12 @@
 namespace tac_optimizer {
     sequence<EggAssign> start(sequence<EggAssign> ss);
-    boolean check_eq(string lhs, string rhs);
+    EqualityResult check_eq(string lhs, string rhs);
+};
+
+dictionary EqualityResult {
+    boolean result;
+    string leftv;
+    string rightv;
 };
 
 dictionary EggAssign {
