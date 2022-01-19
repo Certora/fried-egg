@@ -1,42 +1,21 @@
 
-use egg::{rewrite as rw, Rewrite, Runner, Analysis, Id, Language, DidMerge};
-use ruler::{self, EVM, eval_evm};
+use egg::{Rewrite, Runner, Analysis, Id, Language, DidMerge, Pattern};
+use ruler::{self, EVM, eval_evm, get_pregenerated_rules};
 use std::time::Duration;
 use primitive_types::U256;
 use rand::Rng;
 
 pub struct LogicalEquality {}
 
-#[rustfmt::skip]
 fn rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
-    vec![
-        rw!("comm-add";  "(+ ?a ?b)"        => "(+ ?b ?a)"),
-        rw!("comm-mul";  "(* ?a ?b)"        => "(* ?b ?a)"),
-
-        rw!("assoc-add"; "(+ ?a (+ ?b ?c))" => "(+ (+ ?a ?b) ?c)"),
-        rw!("assoc-add-rev"; "(+ (+ ?a ?b) ?c)" => "(+ ?a (+ ?b ?c))"),
-        rw!("assoc-mul"; "(* ?a (* ?b ?c))" => "(* (* ?a ?b) ?c)"),
-        rw!("assoc-mul-rev"; "(* (* ?a ?b) ?c)" => "(* ?a (* ?b ?c))"),
-
-        rw!("sub-canon"; "(- ?a ?b)" => "(+ ?a (* -1 ?b))"),
-        rw!("dup-canon"; "(+ ?a ?a)" => "(* 2 ?a)"),
-
-        rw!("zero-add"; "(+ ?a 0)" => "?a"),
-        rw!("zero-mul"; "(* ?a 0)" => "0"),
-        rw!("one-mul";  "(* ?a 1)" => "?a"),
-        rw!("add-zero"; "?a" => "(+ ?a 0)"),
-        rw!("mul-one";  "?a" => "(* ?a 1)"),
-
-        rw!("cancel-sub"; "(- ?a ?a)" => "0"),
-        rw!("distribute"; "(* ?a (+ ?b ?c))"        => "(+ (* ?a ?b) (* ?a ?c))"),
-        rw!("factor"    ; "(+ (* ?a ?b) (* ?a ?c))" => "(* ?a (+ ?b ?c))"),
-
-        // comparisons
-        rw!("lt-same"; "(< ?a ?a)" => "false"),
-        rw!("gt-same"; "(> ?a ?a)" => "false"),
-        rw!("lte-same"; "(<= ?a ?a)" => "true"),
-        rw!("gte-same"; "(>= ?a ?a)" => "true"),
-    ]
+    let str_rules = get_pregenerated_rules();
+    let mut res = vec![];
+    for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
+        let lparsed: Pattern<EVM> = lhs.parse().unwrap();
+        let rparsed: Pattern<EVM> = rhs.parse().unwrap();
+        res.push(Rewrite::<EVM, LogicalAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap());
+    }
+    res
 }
 
 type EGraph = egg::EGraph<EVM, LogicalAnalysis>;
