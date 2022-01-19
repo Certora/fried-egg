@@ -1,5 +1,6 @@
-use crate::tac::{TAC, eval_tac};
-use egg::{rewrite as rw, Rewrite, Runner, Analysis, Id, Language};
+
+use egg::{rewrite as rw, Rewrite, Runner, Analysis, Id, Language, DidMerge};
+use ruler::{self, EVM, eval_evm};
 use std::time::Duration;
 use primitive_types::U256;
 use rand::Rng;
@@ -7,7 +8,7 @@ use rand::Rng;
 pub struct LogicalEquality {}
 
 #[rustfmt::skip]
-fn rules() -> Vec<Rewrite<TAC, LogicalAnalysis>> {
+fn rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
     vec![
         rw!("comm-add";  "(+ ?a ?b)"        => "(+ ?b ?a)"),
         rw!("comm-mul";  "(* ?a ?b)"        => "(* ?b ?a)"),
@@ -38,7 +39,7 @@ fn rules() -> Vec<Rewrite<TAC, LogicalAnalysis>> {
     ]
 }
 
-type EGraph = egg::EGraph<TAC, LogicalAnalysis>;
+type EGraph = egg::EGraph<EVM, LogicalAnalysis>;
 
 #[derive(Default, Debug, Clone)]
 struct Data {
@@ -50,12 +51,12 @@ const CVEC_LEN: usize = 20;
 
 #[derive(Default, Debug, Clone)]
 struct LogicalAnalysis;
-impl Analysis<TAC> for LogicalAnalysis {
+impl Analysis<EVM> for LogicalAnalysis {
     type Data = Data;
 
-    fn make(egraph: &EGraph, enode: &TAC) -> Self::Data {
+    fn make(egraph: &EGraph, enode: &EVM) -> Self::Data {
         let cvec = match enode {
-            TAC::Var(_) => {
+            EVM::Var(_) => {
                 let mut cvec = vec![];
                 cvec.push(U256::zero());
                 cvec.push(U256::one());
@@ -76,7 +77,7 @@ impl Analysis<TAC> for LogicalAnalysis {
                     let second = child_const.get(1).unwrap_or(&None)
                         .map(|v| *v.get(i).unwrap());
                                         
-                    cvec.push(eval_tac(enode, first, second))
+                    cvec.push(eval_evm(enode, first, second))
                 }
                 match cvec[0] {
                     Some(_) => {
@@ -91,13 +92,13 @@ impl Analysis<TAC> for LogicalAnalysis {
         enode.for_each(|child| child_const.push(egraph[child].data.constant));
         let first = child_const.get(0).unwrap_or(&None);
         let second = child_const.get(1).unwrap_or(&None);
-        let constant = eval_tac(enode, *first, *second);
+        let constant = eval_evm(enode, *first, *second);
 
         Data { cvec, constant }
     }
 
 
-    fn merge(&self, to: &mut Self::Data, from: Self::Data) -> bool {
+    fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         match (to.cvec.as_ref(), from.cvec) {
             (None, Some(b)) => to.cvec = Some(b.clone()),
             (None, None) => (),
@@ -112,14 +113,14 @@ impl Analysis<TAC> for LogicalAnalysis {
             (Some(a), Some(b)) => assert_eq!(a, b),
         }
 
-        false
+        DidMerge(false, false)
     }
 
     fn modify(egraph: &mut EGraph, id: Id) {
         let class = &mut egraph[id];
         if let Some(c) = class.data.constant {
-            let added = egraph.add(TAC::Num(c));
-            let (id, _did_something) = egraph.union(id, added);
+            let added = egraph.add(EVM::Num(c));
+            egraph.union(id, added);
             assert!(
                 !egraph[id].nodes.is_empty(),
                 "empty eclass! {:#?}",
@@ -154,7 +155,7 @@ impl LogicalEquality {
         let end = egraph.add_expr(&rhs.parse().unwrap());
         println!("{} {}", lhs, rhs);
 
-        let mut runner: Runner<TAC, LogicalAnalysis> = Runner::new(egraph.analysis.clone())
+        let mut runner: Runner<EVM, LogicalAnalysis> = Runner::new(egraph.analysis.clone())
             .with_egraph(egraph)
             .with_node_limit(20_000)
             .with_time_limit(Duration::from_secs(60))
