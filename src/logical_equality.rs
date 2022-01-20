@@ -136,8 +136,8 @@ impl LogicalEquality {
 
         let mut runner: Runner<EVM, LogicalAnalysis> = Runner::new(egraph.analysis.clone())
             .with_egraph(egraph)
-            .with_node_limit(20_000)
-            .with_time_limit(Duration::from_secs(60))
+            .with_node_limit(1_000_000)
+            .with_time_limit(Duration::from_secs(2))
             .with_iter_limit(usize::MAX)
             .with_hook(move |runner| {
                 let svec = runner.egraph[start].data.cvec.as_ref();
