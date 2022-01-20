@@ -7,7 +7,7 @@ use rand::Rng;
 
 pub struct LogicalEquality {}
 
-fn rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
+pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
     let str_rules = get_pregenerated_rules();
     let mut res = vec![];
     for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
@@ -21,7 +21,7 @@ fn rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
 type EGraph = egg::EGraph<EVM, LogicalAnalysis>;
 
 #[derive(Default, Debug, Clone)]
-struct Data {
+pub struct Data {
     cvec: Option<Vec<U256>>,
     constant: Option<U256>,
 }
@@ -29,7 +29,7 @@ struct Data {
 const CVEC_LEN: usize = 20;
 
 #[derive(Default, Debug, Clone)]
-struct LogicalAnalysis;
+pub struct LogicalAnalysis;
 impl Analysis<EVM> for LogicalAnalysis {
     type Data = Data;
 
@@ -128,13 +128,12 @@ impl LogicalEquality {
         Self {}
     }
 
-    pub fn run(self, lhs: String, rhs: String) -> crate::EqualityResult {
+    pub fn make_runner(lhs: &String, rhs: &String) -> Runner<EVM, LogicalAnalysis> {
         let mut egraph = EGraph::new(LogicalAnalysis);
         let start = egraph.add_expr(&lhs.parse().unwrap());
         let end = egraph.add_expr(&rhs.parse().unwrap());
-        println!("{} {}", lhs, rhs);
 
-        let mut runner: Runner<EVM, LogicalAnalysis> = Runner::new(egraph.analysis.clone())
+        Runner::new(egraph.analysis.clone())
             .with_egraph(egraph)
             .with_node_limit(1_000_000)
             .with_time_limit(Duration::from_secs(2))
@@ -149,19 +148,53 @@ impl LogicalEquality {
                 } else {
                     Ok(())
                 }
-            });
-        runner = runner.run(&rules());
-        let result = if runner.egraph.find(start) == runner.egraph.find(end) {
-            true
+            })
+    }
+
+    pub fn run(self, lhs: String, rhs: String) -> crate::EqualityResult {
+        let mut runner: Runner<EVM, LogicalAnalysis> = LogicalEquality::make_runner(&lhs, &rhs);
+
+        runner = runner.run(&logical_rules());
+        let start = runner.egraph.add_expr(&lhs.parse().unwrap());
+        let end = runner.egraph.add_expr(&rhs.parse().unwrap());
+        let result = if start == end {
+            true 
         } else {
             false
         };
+
+        println!("Results: {} {} {}", lhs, rhs, result);
         let cvec_left_string = cvec_to_string(runner.egraph[start].data.cvec.as_ref());
         let cvec_right_string = cvec_to_string(runner.egraph[end].data.cvec.as_ref());
         return crate::EqualityResult {
             result,
             leftv: cvec_left_string,
             rightv: cvec_right_string,
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use crate::logical_equality::logical_rules;
+    use egg::Runner;
+
+    #[test]
+    fn logical_simple() {
+        let queries = vec![("(+ 1 1)", "2"),
+                           ("(- a 1)", "(+ a (- 0 1))"),
+                           ("(* (- c 1) 32)", "(- (* c 32) 32)"),
+                           ("(- (+ a (+ b (* c 32))) (+ a (+ b (* (- c 1) 32))))", "32")];
+        for (lhs, rhs) in queries {
+            let mut runner: Runner<EVM, LogicalAnalysis> = LogicalEquality::make_runner(&lhs.to_string(), &rhs.to_string());
+
+            runner = runner.run(&logical_rules());
+
+            if runner.egraph.add_expr(&lhs.parse().unwrap()) != runner.egraph.add_expr(&rhs.parse().unwrap()) {
+                panic!("could not prove equal {},   {}", lhs, rhs);
+            }
         }
     }
 }

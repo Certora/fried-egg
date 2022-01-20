@@ -1,4 +1,4 @@
-mod logical_equality;
+pub mod logical_equality;
 mod statement;
 
 use clap::Parser;
@@ -6,7 +6,7 @@ use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
-use crate::logical_equality::LogicalEquality;
+use crate::logical_equality::{LogicalEquality, LogicalAnalysis};
 use ruler::{EVM};
 use primitive_types::U256;
 use std::sync::Mutex;
