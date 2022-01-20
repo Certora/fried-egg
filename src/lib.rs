@@ -122,7 +122,7 @@ impl Analysis<EVM> for TacAnalysis {
         let age: Option<usize>;
         match enode {
             EVM::Num(c) => {
-                constant = Some(*c);
+                constant = Some(c.value);
                 age = Some(0);
             }
             EVM::Havoc => {
@@ -239,7 +239,7 @@ impl Analysis<EVM> for TacAnalysis {
     fn modify(egraph: &mut EGraph, id: Id) {
         let class = &mut egraph[id];
         if let Some(c) = class.data.constant {
-            let added = egraph.add(EVM::Num(c));
+            let added = egraph.add(EVM::from(c));
             egraph.union(id, added);
             assert!(
                 !egraph[id].nodes.is_empty(),

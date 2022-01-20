@@ -98,7 +98,7 @@ impl Analysis<EVM> for LogicalAnalysis {
     fn modify(egraph: &mut EGraph, id: Id) {
         let class = &mut egraph[id];
         if let Some(c) = class.data.constant {
-            let added = egraph.add(EVM::Num(c));
+            let added = egraph.add(EVM::from(c));
             egraph.union(id, added);
             assert!(
                 !egraph[id].nodes.is_empty(),
@@ -157,11 +157,7 @@ impl LogicalEquality {
         runner = runner.run(&logical_rules());
         let start = runner.egraph.add_expr(&lhs.parse().unwrap());
         let end = runner.egraph.add_expr(&rhs.parse().unwrap());
-        let result = if start == end {
-            true 
-        } else {
-            false
-        };
+        let result = start == end;
 
         println!("Results: {} {} {}", lhs, rhs, result);
         let cvec_left_string = cvec_to_string(runner.egraph[start].data.cvec.as_ref());
@@ -186,13 +182,18 @@ mod tests {
         let queries = vec![("(+ 1 1)", "2"),
                            ("(- a 1)", "(+ a (- 0 1))"),
                            ("(* (- c 1) 32)", "(- (* c 32) 32)"),
-                           ("(- (+ a (+ b (* c 32))) (+ a (+ b (* (- c 1) 32))))", "32")];
+                           ("(- (+ a (+ b (* c 32))) (+ a (+ b (* (- c 1) 32))))", "32"),
+                           ("(- (+ a (+ b (* longname 32))) (+ a (+ b (* (- longname 1) 32))))",  "32")];
         for (lhs, rhs) in queries {
             let mut runner: Runner<EVM, LogicalAnalysis> = LogicalEquality::make_runner(&lhs.to_string(), &rhs.to_string());
 
             runner = runner.run(&logical_rules());
+            let l_parsed = &lhs.parse().unwrap();
+            let r_parsed = &rhs.parse().unwrap();
 
-            if runner.egraph.add_expr(&lhs.parse().unwrap()) != runner.egraph.add_expr(&rhs.parse().unwrap()) {
+            println!("{} {}", l_parsed, r_parsed);
+
+            if runner.egraph.add_expr(l_parsed) != runner.egraph.add_expr(r_parsed) {
                 panic!("could not prove equal {},   {}", lhs, rhs);
             }
         }

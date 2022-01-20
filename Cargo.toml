@@ -23,7 +23,7 @@ once_cell = "1.8.0"
 uniffi = "0.16.0"
 primitive-types = { version = "0.10", default-features = false, features = ["rlp"] }
 rand = "0.8.4"
-ruler = { git = "ssh://git@github.com/Certora/ruler-evm", rev = "388cedb1fd542113feeadfac74e413d679312b27" }
+ruler = { git = "ssh://git@github.com/Certora/ruler-evm", rev = "816570cb57d2da3ed2c6e48416daa3149015083c" }
 
 [build-dependencies]
 uniffi_build = {version = "0.14", features = [ "builtin-bindgen" ]}
