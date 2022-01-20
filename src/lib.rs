@@ -260,7 +260,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("sub-0"; "(- ?a 0)" <=> "?a"),
         rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
         rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (~ ?b))"),
-        rewrite!("add-sub";  "(+ ?a (~ ?b))" <=> "(- ?a ?b)"),
+        // rewrite!("add-sub";  "(+ ?a (~ ?b))" <=> "(- ?a ?b)"),
         rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
     ]
     .concat();
@@ -294,8 +294,7 @@ impl TacOptimizer {
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
         for b in &block_assgns {
-            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());
-            // let mut id_r: Id = id_l;
+            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());;
             assert!(b.rhs.len() > 0, "RHS of this assignment is empty!");
             let id_r = self.egraph.add_expr(&b.rhs.parse().unwrap());
             // if b.rhs.as_ref()[0] != EVM::Havoc {
@@ -325,7 +324,7 @@ impl TacOptimizer {
             match best_l.as_ref()[0] {
                 EVM::Var(vl) => {
                     let vl_age = AGE_MAP.lock().unwrap().get(&vl).unwrap().clone();
-                    let mut extract_right = Extractor::new(
+                    let extract_right = Extractor::new(
                         &runner.egraph,
                         RHSCostFn {
                             age_limit: vl_age,
