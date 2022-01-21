@@ -375,6 +375,20 @@ pub fn check_eq(lhs: String, rhs: String) -> EqualityResult {
 
 std::include!("tac_optimizer.uniffi.rs");
 
+pub fn check_test(actual: Vec<EggAssign>, expected: Vec<EggAssign>) {
+    assert_eq!(actual.len(), expected.len());
+    let mut res = true;
+    for (a, e) in actual.iter().zip(expected.iter()) {
+        if res == false {
+            break;
+        }
+        res = res
+            && (a.lhs.to_string() == e.lhs.to_string())
+            && (a.rhs.to_string() == e.rhs.to_string())
+    }
+    assert_eq!(res, true)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::*;
@@ -398,9 +412,21 @@ mod tests {
             },
         ];
         let res = opt.run(input);
-        for r in res {
-            println!("{} = {}", r.lhs, r.rhs);
-        }
+        let expected = vec![
+            EggAssign {
+                lhs: "R194".to_string(),
+                rhs: "64".to_string(),
+            },
+            EggAssign {
+                lhs: "R198".to_string(),
+                rhs: "96".to_string(),
+            },
+            EggAssign {
+                lhs: "R202".to_string(),
+                rhs: "32".to_string(),
+            },
+        ];
+        check_test(res, expected);
     }
 
     #[test]
@@ -426,9 +452,26 @@ mod tests {
             },
         ];
         let res = opt.run(input);
-        for r in res {
-            println!("{} = {}", r.lhs, r.rhs);
-        }
+        let expected = vec![
+            EggAssign {
+                lhs: "x2".to_string(),
+                rhs: "Havoc".to_string(),
+            },
+            EggAssign {
+                lhs: "x1".to_string(),
+                rhs: "(+ Havoc 96)".to_string(),
+            },
+            EggAssign {
+                lhs: "x3".to_string(),
+                rhs: "(- Havoc 64)".to_string(),
+            },
+            EggAssign {
+                lhs: "x4".to_string(),
+                rhs: "64".to_string(),
+            },
+        ];
+        check_test(res, expected);
+
     }
 
     #[test]
@@ -462,9 +505,33 @@ mod tests {
             },
         ];
         let res = opt.run(input);
-        for r in res {
-            println!("{} = {}", r.lhs, r.rhs);
-        }
+        let expected = vec![
+            EggAssign {
+                lhs: "R11".to_string(),
+                rhs: "0".to_string(),
+            },
+            EggAssign {
+                lhs: "R13".to_string(),
+                rhs: "0".to_string(),
+            },
+            EggAssign {
+                lhs: "lastHasThrown".to_string(),
+                rhs: "0".to_string(),
+            },
+            EggAssign {
+                lhs: "lastReverted".to_string(),
+                rhs: "1".to_string(),
+            },
+            EggAssign {
+                lhs: "R7".to_string(),
+                rhs: "tacCalldatasize".to_string(),
+            },
+            EggAssign {
+                lhs: "B9".to_string(),
+                rhs: "(< R7 4)".to_string(),
+            },
+        ];
+        check_test(res, expected);
     }
 }
 
