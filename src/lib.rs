@@ -62,6 +62,7 @@ pub struct EqualityResult {
     pub rightv: String,
 }
 
+// TODO: not used.
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
     type Cost = usize;
@@ -89,16 +90,19 @@ impl egg::CostFunction<EVM> for RHSCostFn {
         C: FnMut(Id) -> Self::Cost,
     {
         let op_cost = match enode {
+            EVM::Num(_) => 1,
+            // TODO: not sure what to do with havoc. Do we want to extract them?
+            EVM::Havoc => 20,
             EVM::Var(v) => {
                 if v == &self.lhs {
                     1000
                 } else if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
-                    1
+                    10
                 } else {
                     100
                 }
             }
-            _ => 1,
+            _ => 5,
         };
         enode.fold(op_cost, |sum, i| sum + costs(i))
     }
@@ -240,6 +244,7 @@ impl Analysis<EVM> for TacAnalysis {
         let class = &mut egraph[id];
         if let Some(c) = class.data.constant {
             let added = egraph.add(EVM::from(c));
+            println!("added {} to eclass {}", EVM::from(c), id);
             egraph.union(id, added);
             assert!(
                 !egraph[id].nodes.is_empty(),
@@ -303,9 +308,6 @@ impl TacOptimizer {
             // let mut id_r: Id = id_l;
             assert!(b.rhs.len() > 0, "RHS of this assignment is empty!");
             let id_r = self.egraph.add_expr(&b.rhs.parse().unwrap());
-            // if b.rhs.as_ref()[0] != EVM::Havoc {
-            //     id_r = self.egraph.add_expr(&b.rhs);
-            // }
             self.egraph.union(id_l, id_r);
             roots.push(id_l);
         }
@@ -324,13 +326,15 @@ impl TacOptimizer {
 
         let mut c = 0;
         for id in roots {
-            // simply get lhs from the assignments
-            let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
-            // TODO: check that this is indeed a var.
+            // TODO: can simply get lhs from the assignments but how do we know that the RHS corresponds to the same LHS?
+            // let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
+            let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
+            let best_l = extract_left.find_best(id).1;
+            // check that this is indeed a var.
             match best_l.as_ref()[0] {
                 EVM::Var(vl) => {
                     let vl_age = AGE_MAP.lock().unwrap().get(&vl).unwrap().clone();
-                    let mut extract_right = Extractor::new(
+                    let extract_right = Extractor::new(
                         &runner.egraph,
                         RHSCostFn {
                             age_limit: vl_age,
@@ -459,19 +463,21 @@ mod tests {
             },
             EggAssign {
                 lhs: "x1".to_string(),
-                rhs: "(+ Havoc 96)".to_string(),
+                rhs: "(+ x2 96)".to_string(),
             },
             EggAssign {
                 lhs: "x3".to_string(),
-                rhs: "(- Havoc 64)".to_string(),
+                rhs: "(+ x2 64)".to_string(),
             },
             EggAssign {
                 lhs: "x4".to_string(),
                 rhs: "64".to_string(),
             },
         ];
+        for r in &res {
+            println!("{} = {}", r.lhs, r.rhs);
+        }
         check_test(res, expected);
-
     }
 
     #[test]
@@ -539,6 +545,6 @@ mod tests {
 /*
 x2 := havoc
 x1 := x2 + 96 // x1 = x2 + 96
-x3 := x1 - 32 // x1 = (x3 + 32)
+x3 := x1 - 32 // x3 = x2 + 64
 x4 := x3 - x2 // x4 = 64
 */
