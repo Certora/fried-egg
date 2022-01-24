@@ -6,13 +6,11 @@ use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
-use crate::logical_equality::{LogicalEquality, LogicalAnalysis};
-use ruler::{EVM};
+use ruler::{EVM, WrappedU256};
 use primitive_types::U256;
+use crate::logical_equality::{LogicalEquality, LogicalAnalysis};
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
-
-// use bigint::B256;
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
@@ -50,6 +48,7 @@ pub struct OptParams {
     // #[clap(long, default_value = "input.json")]
     // pub input: String,
 }
+
 
 pub struct EggAssign {
     pub lhs: String,
@@ -120,7 +119,7 @@ impl Analysis<EVM> for TacAnalysis {
     type Data = Data;
 
     fn make(egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM) -> Self::Data {
-        let ct = |i: &Id| egraph[*i].data.constant;
+        let ct = |i: &Id| egraph[*i].data.constant.as_ref();
         let ag = |i: &Id| egraph[*i].data.age;
         let constant: Option<U256>;
         let age: Option<usize>;
@@ -135,7 +134,7 @@ impl Analysis<EVM> for TacAnalysis {
             }
             EVM::Add([a, b]) => {
                 constant = match (ct(a), ct(b)) {
-                    (Some(x), Some(y)) => Some(x + y),
+                    (Some(x), Some(y)) => Some(x.overflowing_add(*y).0),
                     (_, _) => None,
                 };
                 age = match (ag(a), ag(b)) {
@@ -145,7 +144,7 @@ impl Analysis<EVM> for TacAnalysis {
             }
             EVM::Sub([a, b]) => {
                 constant = match (ct(a), ct(b)) {
-                    (Some(x), Some(y)) => Some(x - y),
+                    (Some(x), Some(y)) => Some(x.overflowing_sub(*y).0),
                     (_, _) => None,
                 };
                 age = match (ag(a), ag(b)) {
@@ -155,7 +154,7 @@ impl Analysis<EVM> for TacAnalysis {
             }
             EVM::Mul([a, b]) => {
                 constant = match (ct(a), ct(b)) {
-                    (Some(x), Some(y)) => Some(x * y),
+                    (Some(x), Some(y)) => Some(x.overflowing_mul(*y).0),
                     (_, _) => None,
                 };
                 age = match (ag(a), ag(b)) {
@@ -171,6 +170,16 @@ impl Analysis<EVM> for TacAnalysis {
                 age = match (ag(a), ag(b)) {
                     (Some(x), Some(y)) => Some(max(x, y)),
                     (_, _) => None,
+                };
+            }
+            EVM::Neg([a]) => {
+                constant = match ct(a) {
+                    Some (x) => Some(U256::zero().overflowing_sub(*x).0),
+                    None => None,
+                };
+                age = match ag(a) {
+                    Some(x) => Some(x),
+                    None => None,
                 };
             }
             EVM::Var(v) => {
@@ -219,11 +228,11 @@ impl Analysis<EVM> for TacAnalysis {
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
-        match (to.constant, from.constant) {
+        match (to.constant.as_ref(), from.constant) {
             (None, Some(b)) => to.constant = Some(b.clone()),
             (None, None) => (),
             (Some(_), None) => (),
-            (Some(a), Some(b)) => assert_eq!(a, b),
+            (Some(a), Some(b)) => assert_eq!(*a, b),
         }
         match (to.age, from.age) {
             (None, Some(b)) => to.age = Some(b.clone()),
@@ -241,10 +250,9 @@ impl Analysis<EVM> for TacAnalysis {
     // We don't modify the eclass based on variable age.
     // Just add the constants we get from constant folding.
     fn modify(egraph: &mut EGraph, id: Id) {
-        let class = &mut egraph[id];
-        if let Some(c) = class.data.constant {
-            let added = egraph.add(EVM::from(c));
-            println!("added {} to eclass {}", EVM::from(c), id);
+        let class = &egraph[id];
+        if let Some(c) = *&class.data.constant {
+            let added = egraph.add(EVM::Num(WrappedU256{value: c}));
             egraph.union(id, added);
             assert!(
                 !egraph[id].nodes.is_empty(),
@@ -261,7 +269,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
         rewrite!("commute-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
         rewrite!("sub-cancel"; "(- ?a ?a)" => "0"),
-        rewrite!("add-neg"; "(+ ?a (~ ?a))" => "0"),
+        rewrite!("add-neg"; "(+ ?a (-- ?a))" => "0"),
         rewrite!("mul-0"; "(* ?a 0)" => "0"),
     ];
 
@@ -269,8 +277,8 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("add-0"; "(+ ?a 0)" <=> "?a"),
         rewrite!("sub-0"; "(- ?a 0)" <=> "?a"),
         rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
-        rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (~ ?b))"),
-        rewrite!("add-sub";  "(+ ?a (~ ?b))" <=> "(- ?a ?b)"),
+        rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (-- ?b))"),
+        rewrite!("add-sub";  "(+ ?a (-- ?b))" <=> "(- ?a ?b)"),
         rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
     ]
     .concat();
@@ -311,7 +319,8 @@ impl TacOptimizer {
             self.egraph.union(id_l, id_r);
             roots.push(id_l);
         }
-        self.egraph.rebuild();
+        log::info!("Done adding terms to the egraph.");
+        // self.egraph.rebuild();
 
         // run eqsat with the domain rules
         let mut runner: Runner<EVM, TacAnalysis> = Runner::new(self.egraph.analysis.clone())
@@ -321,15 +330,18 @@ impl TacOptimizer {
             .with_scheduler(egg::SimpleScheduler);
         // runner.roots = ids(&runner.egraph);
         runner.roots = roots.clone();
+        log::info!("Start running rules.");
         runner = runner.run(&rules());
+        log::info!("Done running rules.");
         runner.egraph.rebuild();
 
         let mut c = 0;
         for id in roots {
-            // TODO: can simply get lhs from the assignments but how do we know that the RHS corresponds to the same LHS?
-            // let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
-            let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
-            let best_l = extract_left.find_best(id).1;
+            // TODO: carefully think why we know that the RHS corresponds to this LHS?
+            // I think the root ids have the right order but need to be careful.
+            let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
+            // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
+            // let best_l = extract_left.find_best(id).1;
             // check that this is indeed a var.
             match best_l.as_ref()[0] {
                 EVM::Var(vl) => {
@@ -361,7 +373,6 @@ pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = Default::default();
     let res = TacOptimizer::new(params).run(ss);
     return res;
-    // let _ = env_logger::builder().try_init();
 
     // match Command::parse() {
     //     Command::Optimize(params) => {
@@ -379,7 +390,14 @@ pub fn check_eq(lhs: String, rhs: String) -> EqualityResult {
 
 std::include!("tac_optimizer.uniffi.rs");
 
-pub fn check_test(actual: Vec<EggAssign>, expected: Vec<EggAssign>) {
+pub fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
+    let _ = env_logger::builder().try_init();
+    let params = Default::default();
+    let opt = crate::TacOptimizer::new(params);
+    let actual = opt.run(input);
+    for r in &actual {
+        println!("{} = {}", r.lhs, r.rhs);
+    }
     assert_eq!(actual.len(), expected.len());
     let mut res = true;
     for (a, e) in actual.iter().zip(expected.iter()) {
@@ -399,8 +417,6 @@ mod tests {
 
     #[test]
     fn test1() {
-        let params = Default::default();
-        let opt = crate::TacOptimizer::new(params);
         let input = vec![
             EggAssign {
                 lhs: "R194".to_string(),
@@ -415,7 +431,6 @@ mod tests {
                 rhs: "(- R198 R194)".to_string(),
             },
         ];
-        let res = opt.run(input);
         let expected = vec![
             EggAssign {
                 lhs: "R194".to_string(),
@@ -430,13 +445,11 @@ mod tests {
                 rhs: "32".to_string(),
             },
         ];
-        check_test(res, expected);
+        check_test(input, expected);
     }
 
     #[test]
     fn test2() {
-        let params = Default::default();
-        let opt = crate::TacOptimizer::new(params);
         let input = vec![
             EggAssign {
                 lhs: "x2".to_string(),
@@ -455,7 +468,6 @@ mod tests {
                 rhs: "(- x3 x2)".to_string(),
             },
         ];
-        let res = opt.run(input);
         let expected = vec![
             EggAssign {
                 lhs: "x2".to_string(),
@@ -474,16 +486,11 @@ mod tests {
                 rhs: "64".to_string(),
             },
         ];
-        for r in &res {
-            println!("{} = {}", r.lhs, r.rhs);
-        }
-        check_test(res, expected);
+        check_test(input, expected);
     }
 
     #[test]
     fn test3() {
-        let params = Default::default();
-        let opt = crate::TacOptimizer::new(params);
         let input = vec![
             EggAssign {
                 lhs: "R11".to_string(),
@@ -510,7 +517,6 @@ mod tests {
                 rhs: "(< R7 4)".to_string(),
             },
         ];
-        let res = opt.run(input);
         let expected = vec![
             EggAssign {
                 lhs: "R11".to_string(),
@@ -537,7 +543,57 @@ mod tests {
                 rhs: "(< R7 4)".to_string(),
             },
         ];
-        check_test(res, expected);
+        check_test(input, expected);
+    }
+
+    #[test]
+    fn test4() {
+        let input = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "64".to_string(),
+            },
+            EggAssign {
+                lhs: "R2".to_string(),
+                rhs: "(+ 32 R1)".to_string(),
+            }
+        ];
+        let expected = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "64".to_string(),
+            },
+            EggAssign {
+                lhs: "R2".to_string(),
+                rhs: "96".to_string(),
+            }
+        ];
+        check_test(input, expected);
+    }
+
+    #[test]
+    fn test5() {
+        let input = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "64".to_string(),
+            },
+            EggAssign {
+                lhs: "R2".to_string(),
+                rhs: "(- 32 R1)".to_string(),
+            }
+        ];
+        let expected = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "64".to_string(),
+            },
+            EggAssign {
+                lhs: "R2".to_string(),
+                rhs: "32".to_string(),
+            }
+        ];
+        check_test(input, expected);
     }
 }
 
