@@ -1,5 +1,5 @@
 
-use egg::{Rewrite, Runner, Analysis, Id, Language, DidMerge, Pattern};
+use egg::{Rewrite, Runner, Analysis, Id, Language, DidMerge, Pattern, rewrite};
 use ruler::{self, EVM, eval_evm, get_pregenerated_rules};
 use std::time::Duration;
 use primitive_types::U256;
@@ -15,6 +15,14 @@ pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
         let rparsed: Pattern<EVM> = rhs.parse().unwrap();
         res.push(Rewrite::<EVM, LogicalAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap());
     }
+
+    let manual_rules = vec![
+        rewrite!("distr*+"; "(* (+ ?a ?b) ?c)" => "(+ (* ?a ?c) (* ?b ?c))"),
+    ];
+    for rule in manual_rules {
+        res.push(rule);
+    }
+
     res
 }
 
