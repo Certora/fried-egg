@@ -26,5 +26,5 @@ rand = "0.8.4"
 ruler = { git = "ssh://git@github.com/Certora/ruler-evm", rev = "816570cb57d2da3ed2c6e48416daa3149015083c" }
 
 [build-dependencies]
-uniffi_build = {version = "0.14", features = [ "builtin-bindgen" ]}
+uniffi_build = {version = "0.16.0", features = [ "builtin-bindgen" ]}
 

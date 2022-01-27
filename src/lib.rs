@@ -6,11 +6,12 @@ use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
-use crate::logical_equality::{LogicalEquality, LogicalAnalysis};
+use crate::logical_equality::{LogicalRunner};
 use ruler::{EVM};
 use primitive_types::U256;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
+use std::sync::Arc;
 
 // use bigint::B256;
 
@@ -352,6 +353,14 @@ impl TacOptimizer {
     }
 }
 
+// logical runner entry point
+pub fn make_logical_egraph() -> Arc<LogicalRunner> {
+    Arc::new(LogicalRunner::new())
+}
+pub fn run_logical(runner: Arc<LogicalRunner>, lhs: String, rhs: String, timeout: u64) -> EqualityResult {
+    runner.run(lhs, rhs, timeout)
+}
+
 // Entry point
 pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = Default::default();
@@ -366,11 +375,6 @@ pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 
     //     }
     // }
-}
-
-// Logical Equality Entry Point
-pub fn check_eq(lhs: String, rhs: String) -> EqualityResult {
-    LogicalEquality::new().run(lhs, rhs)
 }
 
 std::include!("tac_optimizer.uniffi.rs");

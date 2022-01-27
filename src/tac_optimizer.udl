@@ -1,6 +1,7 @@
 namespace tac_optimizer {
     sequence<EggAssign> start(sequence<EggAssign> ss);
-    EqualityResult check_eq(string lhs, string rhs);
+    LogicalRunner make_logical_egraph();
+    EqualityResult run_logical(LogicalRunner runner, string lhs, string rhs, u64 timeout);
 };
 
 dictionary EqualityResult {
@@ -12,4 +13,8 @@ dictionary EqualityResult {
 dictionary EggAssign {
     string lhs;
     string rhs;
+};
+
+
+interface LogicalRunner {
 };
