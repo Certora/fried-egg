@@ -38,7 +38,7 @@ pub struct OptParams {
     ////////////////
     // eqsat args //
     ////////////////
-    #[clap(long, default_value = "2")]
+    #[clap(long, default_value = "5")]
     pub eqsat_iter_limit: u64,
     #[clap(long, default_value = "100000")]
     pub eqsat_node_limit: u64,
@@ -52,7 +52,7 @@ pub struct OptParams {
 impl Default for OptParams {
     fn default() -> Self {
         Self {
-            eqsat_iter_limit: 2,
+            eqsat_iter_limit: 5,
             eqsat_node_limit: 10000
         }
     }
@@ -156,12 +156,6 @@ impl Analysis<EVM> for TacAnalysis {
                     (_, _) => None,
                 };
             }
-            EVM::Neg([a]) => {
-                age = match ag(a) {
-                    Some(x) => Some(x),
-                    None => None,
-                };
-            }
             EVM::Lt([a, b]) => {
                 //constant = None; // TODO: should change this to fold bools too
                 age = match (ag(a), ag(b)) {
@@ -213,18 +207,18 @@ impl Analysis<EVM> for TacAnalysis {
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
        match (to.constant.as_ref(), from.constant) {
-            (None, Some(b)) => {to.constant = Some(b.clone()); return DidMerge(true, false)} ,
+            (None, Some(b)) => to.constant = Some(b.clone()),
             (None, None) => (),
             (Some(_), None) => (),
             (Some(a), Some(b)) => assert_eq!(*a, b),
         }
         match (to.age, from.age) {
-            (None, Some(b)) => {to.age = Some(b.clone()); return DidMerge(true, false)},
+            (None, Some(b)) => to.age = Some(b.clone()),
             (None, None) => (),
             (Some(_), None) => (),
             // when two eclasses with different variables are merged,
             // update the age to be the one of the youngest (largest age value).
-            (Some(a), Some(b)) => {to.age = Some(max(a, b)); return DidMerge(true, false)},
+            (Some(a), Some(b)) => to.age = Some(max(a, b)),
         }
 
         DidMerge(false, false)
@@ -233,18 +227,17 @@ impl Analysis<EVM> for TacAnalysis {
     // We don't modify the eclass based on variable age.
     // Just add the constants we get from constant folding.
     fn modify(egraph: &mut EGraph, id: Id) {
-        // let class = &mut egraph[id];
-        // if let Some(c) = class.data.constant {
-        //     println!("constant is {}", c);
-        //     let added = egraph.add(EVM::new(c));
-        //     println!("added: {}", added);
-        //     egraph.union(id, added);
-        //     assert!(
-        //         !egraph[id].nodes.is_empty(),
-        //         "empty eclass! {:#?}",
-        //         egraph[id]
-        //     );
-        // }
+        let class = &mut egraph[id];
+        if let Some(c) = class.data.constant {
+            let added = egraph.add(EVM::from(c));
+            egraph.union(id, added);
+            egraph.rebuild();
+            assert!(
+                !egraph[id].nodes.is_empty(),
+                "empty eclass! {:#?}",
+                egraph[id]
+            );
+        }
     }
 }
 
@@ -254,7 +247,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
         rewrite!("commute-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
         rewrite!("sub-cancel"; "(- ?a ?a)" => "0"),
-        rewrite!("add-neg"; "(+ ?a (-- ?a))" => "0"),
+        rewrite!("add-neg"; "(+ ?a (- 0 ?a))" => "0"),
         rewrite!("mul-0"; "(* ?a 0)" => "0"),
     ];
 
@@ -262,8 +255,8 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("add-0"; "(+ ?a 0)" <=> "?a"),
         rewrite!("sub-0"; "(- ?a 0)" <=> "?a"),
         rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
-        rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (-- ?b))"),
-        rewrite!("add-sub";  "(+ ?a (-- ?b))" <=> "(- ?a ?b)"),
+        rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (- 0 ?b))"),
+        rewrite!("add-sub";  "(+ ?a (- 0 ?b))" <=> "(- ?a ?b)"),
         rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
     ].concat();
 
@@ -314,9 +307,9 @@ impl TacOptimizer {
             .with_scheduler(egg::SimpleScheduler);
         runner.roots = roots.clone();
         runner = runner.run(&rules());
-        log::info!("Done running rules.");
         runner.egraph.rebuild();
-        runner.egraph.dot().to_svg("target/foo.svg").unwrap();
+        log::info!("Done running rules.");
+        //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
         let mut c = 0;
         for id in roots {
             // TODO: carefully think why we know that the RHS corresponds to this LHS?
@@ -353,7 +346,6 @@ impl TacOptimizer {
 // Entry point
 pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = OptParams::default();
-    println!("params: {}, {}", &params.eqsat_iter_limit, params.eqsat_node_limit);
     let res = TacOptimizer::new(params).run(ss);
     return res;
 
@@ -581,7 +573,6 @@ mod tests {
 
     #[test]
     fn test6() {
-        // println!("{}", U256::from_dec_str("32").unwrap().overflowing_sub(U256::from_dec_str("64").unwrap()).0);
         let input = vec![
             EggAssign {
                 lhs: "R1".to_string(),
