@@ -39,9 +39,9 @@ pub struct OptParams {
     // eqsat args //
     ////////////////
     #[clap(long, default_value = "5")]
-    pub eqsat_iter_limit: u64,
+    pub eqsat_iter_limit: usize,
     #[clap(long, default_value = "100000")]
-    pub eqsat_node_limit: u64,
+    pub eqsat_node_limit: usize,
     ////////////////
     // block from TAC CFG //
     ////////////////
@@ -97,8 +97,6 @@ impl egg::CostFunction<EVM> for RHSCostFn {
     {
         let op_cost = match enode {
             EVM::Num(_) => 1,
-            // TODO: not sure what to do with havoc. Do we want to extract them?
-            EVM::Havoc => 20,
             EVM::Var(v) => {
                 if v == &self.lhs {
                     1000
@@ -181,9 +179,6 @@ impl Analysis<EVM> for TacAnalysis {
                     (_, _) => None,
                 };
             }
-            EVM::Havoc => {
-                age = Some(0);
-            }
             EVM::Var(v) => {
                 age = {
                     let a = *AGE.lock().unwrap();
@@ -220,7 +215,6 @@ impl Analysis<EVM> for TacAnalysis {
             // update the age to be the one of the youngest (largest age value).
             (Some(a), Some(b)) => to.age = Some(max(a, b)),
         }
-
         DidMerge(false, false)
     }
 
@@ -257,6 +251,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
         rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (- 0 ?b))"),
         rewrite!("add-sub";  "(+ ?a (- 0 ?b))" <=> "(- ?a ?b)"),
+        rewrite!("assoc-sub"; "(- (+ ?a ?b) ?c))" <=> "(+ ?a (- ?b ?c))"),
         rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
     ].concat();
 
@@ -302,8 +297,8 @@ impl TacOptimizer {
         // run eqsat with the domain rules
         let mut runner: Runner<EVM, TacAnalysis> = Runner::new(self.egraph.analysis.clone())
             .with_egraph(self.egraph)
-            .with_iter_limit(1 as usize)
-            .with_node_limit(100)
+            .with_iter_limit(self.params.eqsat_iter_limit)
+            .with_node_limit(self.params.eqsat_node_limit)
             .with_scheduler(egg::SimpleScheduler);
         runner.roots = roots.clone();
         runner = runner.run(&rules());
@@ -454,7 +449,7 @@ mod tests {
             },
             EggAssign {
                 lhs: "x3".to_string(),
-                rhs: "(+ x2 64)".to_string(),
+                rhs: "(- x1 32)".to_string(),
             },
             EggAssign {
                 lhs: "x4".to_string(),
