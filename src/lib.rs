@@ -357,8 +357,17 @@ impl TacOptimizer {
 pub fn make_logical_egraph() -> Arc<LogicalRunner> {
     Arc::new(LogicalRunner::new())
 }
-pub fn run_logical(runner: Arc<LogicalRunner>, lhs: String, rhs: String, timeout: u64) -> EqualityResult {
-    runner.run(lhs, rhs, timeout)
+
+pub fn add_logical(runner: Arc<LogicalRunner>, expr: String) {
+    runner.add_expr(expr);
+}
+
+pub fn run_logical(runner: Arc<LogicalRunner>, timeout: u64) {
+    runner.run(timeout)
+}
+
+pub fn are_equal_logical(runner: Arc<LogicalRunner>, expr1: String, expr2: String) -> EqualityResult {
+    runner.are_equal(expr1, expr2)
 }
 
 // Entry point

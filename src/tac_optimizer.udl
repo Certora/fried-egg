@@ -1,7 +1,9 @@
 namespace tac_optimizer {
     sequence<EggAssign> start(sequence<EggAssign> ss);
     LogicalRunner make_logical_egraph();
-    EqualityResult run_logical(LogicalRunner runner, string lhs, string rhs, u64 timeout);
+    void add_logical(LogicalRunner runner, string expr);
+    void run_logical(LogicalRunner runner, u64 timeout);
+    EqualityResult are_equal_logical(LogicalRunner runner, string lhs, string rhs);
 };
 
 dictionary EqualityResult {
