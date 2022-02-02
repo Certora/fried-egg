@@ -57,12 +57,6 @@ pub struct EggAssign {
     pub rhs: String,
 }
 
-pub struct EqualityResult {
-    pub result: bool,
-    pub leftv: String,
-    pub rightv: String,
-}
-
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
     type Cost = usize;
@@ -358,16 +352,20 @@ pub fn make_logical_egraph() -> Arc<LogicalRunner> {
     Arc::new(LogicalRunner::new())
 }
 
-pub fn add_logical(runner: Arc<LogicalRunner>, expr: String) {
-    runner.add_expr(expr);
+pub fn add_logical_pair(runner: Arc<LogicalRunner>, expr: String, expr2: String) {
+    runner.add_pair(expr, expr2);
 }
 
 pub fn run_logical(runner: Arc<LogicalRunner>, timeout: u64) {
     runner.run(timeout)
 }
 
-pub fn are_equal_logical(runner: Arc<LogicalRunner>, expr1: String, expr2: String) -> EqualityResult {
+pub fn are_equal_logical(runner: Arc<LogicalRunner>, expr1: String, expr2: String) -> bool {
     runner.are_equal(expr1, expr2)
+}
+
+pub fn are_unequal_fuzzing(runner: Arc<LogicalRunner>, expr1: String, expr2: String) -> bool {
+    runner.are_unequal_fuzzing(expr1, expr2)
 }
 
 // Entry point

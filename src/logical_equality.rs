@@ -160,6 +160,7 @@ fn cvec_to_string(cvec: Option<&Vec<U256>>) -> String {
 pub struct LogicalRunner {
     egraph: RwLock<EGraph>,
     fuzzing_egraph: RwLock<EGraph>,
+    exprs: RwLock<Vec<(String, String)>>,
 }
 
 impl LogicalRunner {
@@ -169,9 +170,11 @@ impl LogicalRunner {
                             U256::zero().overflowing_sub(U256::one()).0];
         let mut analysis = LogicalAnalysis::default();
         analysis.special_constants = constants;
+        analysis.cvec_enabled = true;
         LogicalRunner {
             egraph: RwLock::new(EGraph::new(LogicalAnalysis::default())),
             fuzzing_egraph: RwLock::new(EGraph::new(analysis)),
+            exprs: RwLock::new(vec![]),
         }
     }
 
@@ -197,7 +200,14 @@ impl LogicalRunner {
         LogicalRunner::add_constants(&mut fuzzing_egraph, &l_parsed);
     }
 
-    pub fn are_equal(&self, lhs: String, rhs: String) -> crate::EqualityResult {
+    pub fn add_pair(&self, expr1: String, expr2: String) {
+        self.add_expr(expr1.clone());
+        self.add_expr(expr2.clone());
+        let mut exprs = self.exprs.write().unwrap();
+        exprs.push((expr1, expr2));
+    }
+
+    pub fn are_unequal_fuzzing(&self, lhs: String, rhs: String) -> bool {
         let mut fuzzing_egraph = self.fuzzing_egraph.write().unwrap();
         let start_f = fuzzing_egraph.add_expr(&lhs.parse().unwrap());
         let end_f = fuzzing_egraph.add_expr(&rhs.parse().unwrap());
@@ -205,13 +215,13 @@ impl LogicalRunner {
         let leftvec = fuzzing_egraph[start_f].data.cvec.as_ref();
         let rightvec = fuzzing_egraph[end_f].data.cvec.as_ref();
         if leftvec != rightvec {
-            return crate::EqualityResult {
-                result: false,
-                leftv: cvec_to_string(leftvec),
-                rightv: cvec_to_string(rightvec)
-            }
+            true
+        } else {
+            false
         }
+    }
 
+    pub fn are_equal(&self, lhs: String, rhs: String) -> bool {
         let mut egraph = self.egraph.write().unwrap();
         
         let start = egraph.add_expr(&lhs.parse().unwrap());
@@ -219,20 +229,31 @@ impl LogicalRunner {
         egraph.rebuild();
         let result = start == end;
 
-        return crate::EqualityResult {
-            result,
-            leftv: cvec_to_string(leftvec),
-            rightv: cvec_to_string(rightvec),
-        }
+        return result
     }
 
     pub fn run(&self, timeout: u64) {
         let egraph = self.egraph.read().unwrap().clone();
+        let exprs_check = self.exprs.read().unwrap().clone();
         let mut runner: Runner<EVM, LogicalAnalysis> = Runner::new(LogicalAnalysis::default())
             .with_egraph(egraph)
             .with_node_limit(1_000_000)
             .with_time_limit(Duration::from_millis(timeout))
-            .with_iter_limit(usize::MAX);
+            .with_iter_limit(usize::MAX)
+            .with_hook(move |runner| {
+                let mut done = true;
+                for (expr1, expr2) in &exprs_check {
+                    if runner.egraph.add_expr(&expr1.parse().unwrap()) != runner.egraph.add_expr(&expr2.parse().unwrap()) {
+                        done = false;
+                        break;
+                    }
+                }
+                if done {
+                    Err("All equal".to_string())
+                } else {
+                    Ok(())
+                }
+            });
         
         runner = runner.run(&logical_rules());
         *self.egraph.write().unwrap() = runner.egraph;
@@ -256,7 +277,9 @@ mod tests {
                            ];
         for (lhs, rhs) in queries {
             let runner = LogicalRunner::new();
-            runner.run(lhs.to_string(), rhs.to_string(), 2000);
+            runner.add_expr(lhs.to_string());
+            runner.add_expr(rhs.to_string());
+            runner.run(500);
 
             let l_parsed = &lhs.parse().unwrap();
             let r_parsed = &rhs.parse().unwrap();
