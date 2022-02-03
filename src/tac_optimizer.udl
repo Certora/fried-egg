@@ -1,15 +1,18 @@
 namespace tac_optimizer {
     sequence<EggAssign> start(sequence<EggAssign> ss);
-    EqualityResult check_eq(string lhs, string rhs);
-};
-
-dictionary EqualityResult {
-    boolean result;
-    string leftv;
-    string rightv;
+    
+    LogicalRunner make_logical_egraph();
+    void add_logical_pair(LogicalRunner runner, string expr, string expr2);
+    void run_logical(LogicalRunner runner, u64 timeout);
+    boolean are_equal_logical(LogicalRunner runner, string lhs, string rhs);
+    boolean are_unequal_fuzzing(LogicalRunner runner, string lhs, string rhs);
 };
 
 dictionary EggAssign {
     string lhs;
     string rhs;
+};
+
+
+interface LogicalRunner {
 };

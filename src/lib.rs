@@ -6,11 +6,12 @@ use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
-use ruler::{EVM, eval_evm};
+use crate::logical_equality::{LogicalRunner};
+use ruler::{EVM};
 use primitive_types::U256;
-use crate::logical_equality::{LogicalEquality, LogicalAnalysis};
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
+use std::sync::Arc;
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
@@ -62,6 +63,7 @@ pub struct EggAssign {
     pub rhs: String,
 }
 
+<<<<<<< HEAD
 pub struct EqualityResult {
     pub result: bool,
     pub leftv: String,
@@ -69,6 +71,8 @@ pub struct EqualityResult {
 }
 
 // TODO: not used.
+=======
+>>>>>>> oflatt/logicaleq
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
     type Cost = usize;
@@ -284,8 +288,7 @@ impl TacOptimizer {
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
         for b in &block_assgns {
-            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());
-            // let mut id_r: Id = id_l;
+            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());;
             assert!(b.rhs.len() > 0, "RHS of this assignment is empty!");
             let id_r = self.egraph.add_expr(&b.rhs.parse().unwrap());
             self.egraph.union(id_l, id_r);
@@ -338,6 +341,27 @@ impl TacOptimizer {
     }
 }
 
+// logical runner entry point
+pub fn make_logical_egraph() -> Arc<LogicalRunner> {
+    Arc::new(LogicalRunner::new())
+}
+
+pub fn add_logical_pair(runner: Arc<LogicalRunner>, expr: String, expr2: String) {
+    runner.add_pair(expr, expr2);
+}
+
+pub fn run_logical(runner: Arc<LogicalRunner>, timeout: u64) {
+    runner.run(timeout)
+}
+
+pub fn are_equal_logical(runner: Arc<LogicalRunner>, expr1: String, expr2: String) -> bool {
+    runner.are_equal(expr1, expr2)
+}
+
+pub fn are_unequal_fuzzing(runner: Arc<LogicalRunner>, expr1: String, expr2: String) -> bool {
+    runner.are_unequal_fuzzing(expr1, expr2)
+}
+
 // Entry point
 pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = OptParams::default();
@@ -351,11 +375,6 @@ pub fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 
     //     }
     // }
-}
-
-// Logical Equality Entry Point
-pub fn check_eq(lhs: String, rhs: String) -> EqualityResult {
-    LogicalEquality::new().run(lhs, rhs)
 }
 
 std::include!("tac_optimizer.uniffi.rs");
