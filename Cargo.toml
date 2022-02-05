@@ -26,7 +26,7 @@ rand = "0.8.4"
 num = "0.3"
 num-bigint = { version = "0.3", features = ["rand"] }
 
-# This commit fixes the semantics of neg.
+#ruler = { git = "ssh://git@github.com/Certora/ruler-evm", rev = "03519678ef2c2544a26b37b52380ee572afb5a36" }
 ruler = { git = "ssh://git@github.com/Certora/ruler-evm", rev = "816570cb57d2da3ed2c6e48416daa3149015083c" }
 
 [build-dependencies]

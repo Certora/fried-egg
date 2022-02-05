@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
 use crate::logical_equality::{LogicalRunner};
-use ruler::{EVM};
+use ruler::{eval_evm, EVM};
 use primitive_types::U256;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
@@ -63,16 +63,7 @@ pub struct EggAssign {
     pub rhs: String,
 }
 
-<<<<<<< HEAD
-pub struct EqualityResult {
-    pub result: bool,
-    pub leftv: String,
-    pub rightv: String,
-}
 
-// TODO: not used.
-=======
->>>>>>> oflatt/logicaleq
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
     type Cost = usize;
