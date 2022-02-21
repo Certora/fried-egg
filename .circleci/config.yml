@@ -1,7 +1,3 @@
-# Cache solc and cvc4
-# Export outputs as... artifacts?
-# Z3 lib.so
-# Why fails randomly? could be out of memory for heavier tests
 version: 2.1
 orbs:
   rust: circleci/rust@1.6.0
