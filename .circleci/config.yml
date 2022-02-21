@@ -47,7 +47,7 @@ jobs:
       # Build with caching
       - setup_sccache
       - restore_sccache_cache
-      - cargo build --release
+      - run: cargo build --release
       - save_sccache_cache
 
       # Run tests
