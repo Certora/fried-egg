@@ -1,0 +1,63 @@
+# Cache solc and cvc4
+# Export outputs as... artifacts?
+# Z3 lib.so
+# Why fails randomly? could be out of memory for heavier tests
+version: 2.1
+orbs:
+  rust: circleci/rust@1.6.0
+commands:
+  # Taken from https://medium.com/@edouard.oger/rust-caching-on-circleci-using-sccache-c996344f0115
+  setup_sccache:
+    steps:
+      - run: sudo apt-get install pkg-config libssl-dev
+      - run:
+          name: Install sccache
+          command: |
+            cargo install sccache
+            # This configures Rust to use sccache.
+            echo 'export "RUSTC_WRAPPER"="sccache"' >> $BASH_ENV
+            # This is the maximum space sccache cache will use on disk.
+            echo 'export "SCCACHE_CACHE_SIZE"="1G"' >> $BASH_ENV
+            sccache --version
+  restore_sccache_cache:
+    steps:
+      - restore_cache:
+          name: Restore sccache cache
+          key: sccache-cache-stable-{{ arch }}-{{ .Environment.CIRCLE_JOB }}
+  save_sccache_cache:
+    steps:
+      - save_cache:
+          name: Save sccache cache
+          # We use {{ epoch }} to always upload a fresh cache:
+          # Of course, restore_cache will not find this exact key,
+          # but it will fall back to the closest key (aka the most recent).
+          # See https://discuss.circleci.com/t/add-mechanism-to-update-existing-cache-key/9014/13
+          key: sccache-cache-stable-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ epoch }}
+          paths:
+            - "~/.cache/sccache"
+
+
+jobs:
+  test:
+    working_directory: ~/repo
+
+    steps:
+      - checkout
+      - rust/install
+      - run: apt-get update && subo apt-get install -y cmake
+
+      # Build with caching
+      - setup_sccache
+      - restore_sccache_cache
+      - cargo build --release
+      - save_sccache_cache
+
+      # Run tests
+      - cargo test --release
+
+workflows:
+  version: 2
+  build-test:
+    jobs:
+      - test
+    
