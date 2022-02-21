@@ -51,7 +51,7 @@ jobs:
       - save_sccache_cache
 
       # Run tests
-      - cargo test --release
+      - run: cargo test --release
 
 workflows:
   version: 2
