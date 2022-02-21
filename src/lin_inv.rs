@@ -8,6 +8,7 @@ use primitive_types::U256;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
 use symbolic_expressions::Sexp;
+use symbolic_expressions::parser::parse_str;
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
@@ -275,7 +276,7 @@ impl TacOptimizer {
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
         for b in &block_assgns {
-            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());;
+            let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());
             assert!(b.rhs.len() > 0, "RHS of this assignment is empty!");
             let id_r = self.egraph.add_expr(&b.rhs.parse().unwrap());
             self.egraph.union(id_l, id_r);
@@ -344,10 +345,10 @@ pub fn start_optimize(assignments: Sexp) -> String {
           if pair_list.len() != 2 {
             panic!("Invalid assignment pair: {:?}", pair_list);
           }
-          if let (Sexp::String(lhs), Sexp::String(rhs)) = (&pair_list[0], &pair_list[1]) {
+          if let (Sexp::String(lhs), rhs) = (&pair_list[0], &pair_list[1]) {
             ss.push(EggAssign {
               lhs: lhs.clone(),
-              rhs: rhs.clone(),
+              rhs: rhs.to_string(),
             });
           } else {
             panic!("Invalid assignment pair: {:?}", pair_list);
@@ -362,7 +363,8 @@ pub fn start_optimize(assignments: Sexp) -> String {
 
     let mut res = vec![];
     for assignment in start(ss) {
-      res.push(Sexp::List(vec![Sexp::String(assignment.lhs), Sexp::String(assignment.rhs)]));
+      let right = parse_str(&assignment.rhs).unwrap();
+      res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
     }
 
     Sexp::List(res).to_string()
