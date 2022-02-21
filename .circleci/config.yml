@@ -42,7 +42,7 @@ jobs:
     steps:
       - checkout
       - rust/install
-      - run: apt-get update && sudo apt-get install -y cmake
+      - run: sudo apt-get update && sudo apt-get install -y cmake
 
       # Build with caching
       - setup_sccache
