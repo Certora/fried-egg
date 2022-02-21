@@ -1,6 +1,7 @@
 version: 2.1
 orbs:
   rust: circleci/rust@1.6.0
+
 commands:
   # Taken from https://medium.com/@edouard.oger/rust-caching-on-circleci-using-sccache-c996344f0115
   setup_sccache:
@@ -35,7 +36,8 @@ commands:
 
 jobs:
   test:
-    working_directory: ~/repo
+    docker:
+      - image: cimg/base:stable
 
     steps:
       - checkout
