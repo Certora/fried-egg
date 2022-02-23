@@ -5,7 +5,7 @@ use symbolic_expressions::Sexp;
 pub(crate) mod logical_equality;
 pub(crate) mod lin_inv;
 
-use logical_equality::{start_logical};
+use logical_equality::start_logical;
 use lin_inv::start_optimize;
 
 fn main() {
