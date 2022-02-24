@@ -105,7 +105,7 @@ impl egg::CostFunction<EVM> for RHSCostFn {
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
-    constant: Option<U256>,
+    constant: Option<(U256, PatternAst<EVM>)>,
     age: Option<usize>,
 }
 
@@ -184,10 +184,19 @@ impl Analysis<EVM> for TacAnalysis {
         }
 
         let mut child_const = vec![];
-        enode.for_each(|child| child_const.push(egraph[child].data.constant));
+        enode.for_each(|child| child_const.push(egraph[child].data.constant.as_ref().map(|x| x.0)));
         let first = child_const.get(0).unwrap_or(&None);
         let second = child_const.get(1).unwrap_or(&None);
-        let constant = eval_evm(enode, *first, *second);
+        let constant_option = eval_evm(enode, *first, *second);
+        let constant = if let Some(c) = constant_option {
+            let mut expr = PatternAst::default();
+            let top_node = enode.clone().map_children(|child| expr.add(ENodeOrVar::ENode(EVM::new(egraph[child].data.constant.as_ref().unwrap().0))));
+            expr.add(ENodeOrVar::ENode(top_node));
+            Some((c, expr))
+        } else {
+            None
+        };
+
         Data { constant, age }
     }
 
@@ -200,7 +209,7 @@ impl Analysis<EVM> for TacAnalysis {
             }
             (None, None) => (),
             (Some(_), None) => (),
-            (Some(a), Some(b)) => assert_eq!(*a, b),
+            (Some(a), Some(b)) => assert_eq!(a.0, b.0),
         }
         match (to.age, from.age) {
             (None, Some(b)) => {
@@ -219,11 +228,11 @@ impl Analysis<EVM> for TacAnalysis {
     // We don't modify the eclass based on variable age.
     // Just add the constants we get from constant folding.
     fn modify(egraph: &mut EGraph, id: Id) {
-        let class = &mut egraph[id];
-        if let Some(c) = class.data.constant {
-            let added = egraph.add(EVM::from(c));
-            egraph.union(id, added);
-            egraph.rebuild();
+        if let Some((c, lhs)) = egraph[id].data.constant.clone() {
+            let mut const_pattern = PatternAst::default();
+            const_pattern.add(ENodeOrVar::ENode(EVM::new(c.clone())));
+            let (id, _added) = egraph.union_instantiations(&lhs, &const_pattern, &Default::default(), "constant_folding");
+            
             assert!(
                 !egraph[id].nodes.is_empty(),
                 "empty eclass! {:#?}",
@@ -272,7 +281,7 @@ impl TacOptimizer {
     pub fn new(params: OptParams) -> Self {
         let optimizer = Self {
             params,
-            egraph: EGraph::new(TacAnalysis),
+            egraph: EGraph::new(TacAnalysis).with_explanations_enabled(),
         };
         optimizer
     }
@@ -285,8 +294,7 @@ impl TacOptimizer {
         for b in &block_assgns {
             let id_l = self.egraph.add_expr(&b.lhs.parse().unwrap());
             assert!(b.rhs.len() > 0, "RHS of this assignment is empty!");
-            let id_r = self.egraph.add_expr(&b.rhs.parse().unwrap());
-            self.egraph.union(id_l, id_r);
+            self.egraph.union_instantiations(&b.lhs.parse().unwrap(), &b.rhs.parse().unwrap(), &Default::default(), "assignment");
             roots.push(id_l);
         }
         log::info!("Done adding terms to the egraph.");
@@ -475,7 +483,7 @@ mod tests {
             },
             EggAssign {
                 lhs: "x3".to_string(),
-                rhs: "(- x1 32)".to_string(),
+                rhs: "(+ x2 64)".to_string(),
             },
             EggAssign {
                 lhs: "x4".to_string(),
