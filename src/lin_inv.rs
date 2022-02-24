@@ -192,7 +192,7 @@ impl Analysis<EVM> for TacAnalysis {
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
-        let merge_a = false;
+        let mut merge_a = false;
         match (to.constant.as_ref(), from.constant) {
             (None, Some(b)) => {
                 to.constant = Some(b.clone());
