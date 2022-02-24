@@ -3,17 +3,17 @@ use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
 pub(crate) mod logical_equality;
-pub(crate) mod optimize;
+pub(crate) mod lin_inv;
 
 use logical_equality::start_logical;
-use optimize::start_optimize;
+use lin_inv::start_optimize;
 
 fn main() {
     let stdin = io::stdin();
     'outer: for line in stdin.lock().lines() {
         let expr = parse_str(&line.unwrap()).unwrap();
-        if let Sexp::List(ref list) = expr {
-            if let Sexp::String(ref atom) = list[0] {
+        if let Sexp::List(list) = expr {
+            if let Sexp::String(atom) = &list[0] {
                 match atom.as_ref() {
                     "logical_eq" => {
                         println!(
@@ -26,7 +26,9 @@ fn main() {
                         );
                     }
                     "optimize" => {
-                        println!("{}", start_optimize("".to_string()));
+                        let mut iter = list.into_iter();
+                        iter.next();
+                        println!("{}", start_optimize(iter.next().unwrap()));
                     }
                     "exit" => break 'outer,
                     _ => panic!("unknown command {}", atom),
