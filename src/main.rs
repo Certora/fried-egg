@@ -2,11 +2,11 @@ use std::io::{self, BufRead, Write};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
-pub(crate) mod logical_equality;
 pub(crate) mod lin_inv;
+pub(crate) mod logical_equality;
 
-use logical_equality::{start_logical};
 use lin_inv::start_optimize;
+use logical_equality::start_logical;
 
 fn main() {
     let stdin = io::stdin();
