@@ -308,7 +308,8 @@ impl TacOptimizer {
                 self.egraph.union_instantiations(&assign.lhs.parse().unwrap(), &rhs.parse().unwrap(), &Default::default(), "assignment");
                 roots.push(id_l);
             } else {
-                self.egraph.add_expr(&assign.lhs.parse().unwrap());
+                roots.push(self.egraph.add_expr(&assign.lhs.parse().unwrap()));
+
             }
         }
         log::info!("Done adding terms to the egraph.");
@@ -344,10 +345,10 @@ impl TacOptimizer {
                             lhs: vl,
                         },
                     );
-                    let (_, best_r) = extract_right.find_best(id);
+                    let best_r = extract_right.find_best(id).1.to_string();
                     let assg = EggAssign {
                         lhs: best_l.to_string(),
-                        rhs: Some(best_r.to_string()),
+                        rhs: if best_r == best_l.to_string() { None} else { Some(best_r.to_string())},
                     };
                     res.push(assg);
                 }
@@ -422,11 +423,9 @@ pub fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
         if res == false {
             break;
         }
-        res = res
-            && (a.lhs.to_string() == e.lhs.to_string())
-            && (a.rhs == e.rhs)
+        assert_eq!(a.lhs.to_string(), e.lhs.to_string());
+        assert_eq!(a.rhs, e.rhs);
     }
-    assert_eq!(res, true)
 }
 
 #[cfg(test)]
@@ -440,6 +439,7 @@ mod tests {
     fn test1() {
         let input = vec![
             EggAssign::new("R194", "64"),
+            EggAssign::new("R198", "(+ 32 R194)"),
             EggAssign::new("R202", "(- R198 R194)"),
         ];
         let expected = vec![
