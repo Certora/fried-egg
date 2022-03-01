@@ -258,8 +258,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
         rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (- 0 ?b))"),
         rewrite!("add-sub";  "(+ ?a (- 0 ?b))" <=> "(- ?a ?b)"),
-        // rewrite!("assoc-sub"; "(- (+ ?a ?b) ?c))" <=> "(+ ?a (- ?b ?c))"),
-        rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
+        // rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
     ]
     .concat();
 
