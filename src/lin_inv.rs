@@ -3,12 +3,14 @@ use egg::*;
 use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
-use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
+use primitive_types::U256;
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
-use symbolic_expressions::parser::parse_str;
+use std::fs::{File, write};
+use std::io::Write;
 use symbolic_expressions::Sexp;
+use symbolic_expressions::parser::parse_str;
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
@@ -38,7 +40,7 @@ pub struct OptParams {
     ////////////////
     #[clap(long, default_value = "5")]
     pub eqsat_iter_limit: usize,
-    #[clap(long, default_value = "100000")]
+    #[clap(long, default_value = "10000")]
     pub eqsat_node_limit: usize,
     ////////////////
     // block from TAC CFG //
@@ -51,7 +53,7 @@ impl Default for OptParams {
     fn default() -> Self {
         Self {
             eqsat_iter_limit: 5,
-            eqsat_node_limit: 10000,
+            eqsat_node_limit: 10000
         }
     }
 }
@@ -59,6 +61,7 @@ pub struct EggAssign {
     pub lhs: String,
     pub rhs: String,
 }
+
 
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
@@ -90,7 +93,7 @@ impl egg::CostFunction<EVM> for RHSCostFn {
             EVM::Num(_) => 1,
             EVM::Var(v) => {
                 if v == &self.lhs {
-                    1000
+                   1000
                 } else if AGE_MAP.lock().unwrap().get(v).unwrap() < &self.age_limit {
                     10
                 } else {
@@ -201,28 +204,21 @@ impl Analysis<EVM> for TacAnalysis {
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
-        let mut merge_a = false;
-        match (to.constant.as_ref(), from.constant) {
-            (None, Some(b)) => {
-                to.constant = Some(b.clone());
-                merge_a = true;
-            }
+       match (to.constant.as_ref(), from.constant) {
+            (None, Some(b)) => to.constant = Some(b.clone()),
             (None, None) => (),
             (Some(_), None) => (),
             (Some(a), Some(b)) => assert_eq!(a.0, b.0),
         }
         match (to.age, from.age) {
-            (None, Some(b)) => {
-                to.age = Some(b.clone());
-                merge_a = true;
-            }
+            (None, Some(b)) => to.age = Some(b.clone()),
             (None, None) => (),
             (Some(_), None) => (),
             // when two eclasses with different variables are merged,
             // update the age to be the one of the youngest (largest age value).
             (Some(a), Some(b)) => to.age = Some(max(a, b)),
         }
-        DidMerge(merge_a, true)
+        DidMerge(false, false)
     }
 
     // We don't modify the eclass based on variable age.
@@ -232,7 +228,7 @@ impl Analysis<EVM> for TacAnalysis {
             let mut const_pattern = PatternAst::default();
             const_pattern.add(ENodeOrVar::ENode(EVM::new(c.clone())));
             let (id, _added) = egraph.union_instantiations(&lhs, &const_pattern, &Default::default(), "constant_folding");
-            
+
             assert!(
                 !egraph[id].nodes.is_empty(),
                 "empty eclass! {:#?}",
@@ -244,7 +240,7 @@ impl Analysis<EVM> for TacAnalysis {
 
 // some standard axioms
 pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
-    let mut uni_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
+     let mut uni_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
         rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
         rewrite!("commute-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
         rewrite!("sub-cancel"; "(- ?a ?a)" => "0"),
@@ -259,8 +255,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
         rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (- 0 ?b))"),
         rewrite!("add-sub";  "(+ ?a (- 0 ?b))" <=> "(- ?a ?b)"),
         // rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
-    ]
-    .concat();
+    ].concat();
 
     uni_dirs.append(&mut bi_dirs);
     uni_dirs
@@ -274,6 +269,7 @@ fn _ids(egraph: &EGraph) -> Vec<egg::Id> {
 pub struct TacOptimizer {
     params: OptParams,
     egraph: EGraph,
+    changes: File,
 }
 
 impl TacOptimizer {
@@ -281,6 +277,7 @@ impl TacOptimizer {
         let optimizer = Self {
             params,
             egraph: EGraph::new(TacAnalysis).with_explanations_enabled(),
+            changes: File::create("egg-report.txt").unwrap()
         };
         optimizer
     }
@@ -315,6 +312,7 @@ impl TacOptimizer {
             // TODO: carefully think why we know that the RHS corresponds to this LHS?
             // I think the root ids have the right order but need to be careful.
             let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
+            let orig_r: &RecExpr<EVM> = &block_assgns[c].rhs.parse().unwrap();
             // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
             // let best_l = extract_left.find_best(id).1;
             // check that this is indeed a var.
@@ -329,6 +327,10 @@ impl TacOptimizer {
                         },
                     );
                     let (_, best_r) = extract_right.find_best(id);
+                    if *orig_r.to_string() != best_r.to_string() {
+                        let str = [orig_r.to_string().as_str(), " became ", best_r.to_string().as_str(), "\n"].concat();
+                        self.changes.write(str.as_bytes()).unwrap();
+                    }
                     let assg = EggAssign {
                         lhs: best_l.to_string(),
                         rhs: best_r.to_string(),
@@ -344,9 +346,9 @@ impl TacOptimizer {
 }
 
 fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
-    let params: OptParams = OptParams::default();
-    let res = TacOptimizer::new(params).run(ss);
-    res
+  let params: OptParams = OptParams::default();
+  let res = TacOptimizer::new(params).run(ss);
+  res
 }
 
 // Entry point
@@ -354,31 +356,31 @@ pub fn start_optimize(assignments: Sexp) -> String {
     let mut ss: Vec<EggAssign> = vec![];
 
     if let Sexp::List(ref list) = assignments {
-        for pair in list {
-            if let Sexp::List(ref pair_list) = pair {
-                if pair_list.len() != 2 {
-                    panic!("Invalid assignment pair: {:?}", pair_list);
-                }
-                if let (Sexp::String(lhs), rhs) = (&pair_list[0], &pair_list[1]) {
-                    ss.push(EggAssign {
-                        lhs: lhs.clone(),
-                        rhs: rhs.to_string(),
-                    });
-                } else {
-                    panic!("Invalid assignment pair: {:?}", pair_list);
-                }
-            } else {
-                panic!("Expected a list of pairs!");
-            }
+      for pair in list {
+        if let Sexp::List(ref pair_list) = pair {
+          if pair_list.len() != 2 {
+            panic!("Invalid assignment pair: {:?}", pair_list);
+          }
+          if let (Sexp::String(lhs), rhs) = (&pair_list[0], &pair_list[1]) {
+            ss.push(EggAssign {
+              lhs: lhs.clone(),
+              rhs: rhs.to_string(),
+            });
+          } else {
+            panic!("Invalid assignment pair: {:?}", pair_list);
+          }
+        } else {
+          panic!("Expected a list of pairs!");
         }
+      }
     } else {
-        panic!("Expected a list of assignments!");
+      panic!("Expected a list of assignments!");
     }
 
     let mut res = vec![];
     for assignment in start(ss) {
-        let right = parse_str(&assignment.rhs).unwrap();
-        res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
+      let right = parse_str(&assignment.rhs).unwrap();
+      res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
     }
 
     Sexp::List(res).to_string()
@@ -413,10 +415,12 @@ pub fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use egg::{RecExpr, Symbol};
     use primitive_types::U256;
-    use rust_evm::{eval_evm, WrappedU256, EVM};
+    use rust_evm::{eval_evm, EVM, WrappedU256};
+    use egg::{RecExpr, Symbol};
+    use super::*;
+
+
 
     #[test]
     fn test1() {
@@ -482,7 +486,7 @@ mod tests {
             },
             EggAssign {
                 lhs: "x3".to_string(),
-                rhs: "(+ x2 64)".to_string(),
+                rhs: "(- x1 32)".to_string(),
             },
             EggAssign {
                 lhs: "x4".to_string(),
@@ -559,7 +563,7 @@ mod tests {
             EggAssign {
                 lhs: "R2".to_string(),
                 rhs: "(+ 32 R1)".to_string(),
-            },
+            }
         ];
         let expected = vec![
             EggAssign {
@@ -569,7 +573,7 @@ mod tests {
             EggAssign {
                 lhs: "R2".to_string(),
                 rhs: "96".to_string(),
-            },
+            }
         ];
         check_test(input, expected);
     }
@@ -584,7 +588,7 @@ mod tests {
             EggAssign {
                 lhs: "R2".to_string(),
                 rhs: "(- 32 R1)".to_string(),
-            },
+            }
         ];
         let expected = vec![
             EggAssign {
@@ -593,10 +597,8 @@ mod tests {
             },
             EggAssign {
                 lhs: "R2".to_string(),
-                rhs:
-                    "115792089237316195423570985008687907853269984665640564039457584007913129639904"
-                        .to_string(),
-            },
+                rhs: "115792089237316195423570985008687907853269984665640564039457584007913129639904".to_string(),
+            }
         ];
         check_test(input, expected);
     }
@@ -611,7 +613,7 @@ mod tests {
             EggAssign {
                 lhs: "R2".to_string(),
                 rhs: "(- R1 32)".to_string(),
-            },
+            }
         ];
         let expected = vec![
             EggAssign {
@@ -621,20 +623,49 @@ mod tests {
             EggAssign {
                 lhs: "R2".to_string(),
                 rhs: "32".to_string(),
-            },
+            }
         ];
         check_test(input, expected);
     }
     #[test]
     fn test7() {
-        let input = vec![EggAssign {
-            lhs: "R1".to_string(),
-            rhs: "(- 5 0)".to_string(),
-        }];
-        let expected = vec![EggAssign {
-            lhs: "R1".to_string(),
-            rhs: "5".to_string(),
-        }];
+        let input = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "(- 5 0)".to_string(),
+            }
+        ];
+        let expected = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "5".to_string(),
+            }
+        ];
+        check_test(input, expected);
+    }
+
+    #[test]
+    fn test8() {
+        let input = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "(- R2 2)".to_string(),
+            },
+            EggAssign {
+                lhs: "R3".to_string(),
+                rhs: "(+ R1 1)".to_string(),
+            }
+        ];
+        let expected = vec![
+            EggAssign {
+                lhs: "R1".to_string(),
+                rhs: "(- R2 2)".to_string(),
+            },
+            EggAssign {
+                lhs: "R3".to_string(),
+                rhs: "(- R2 1)".to_string(),
+            }
+        ];
         check_test(input, expected);
     }
 
@@ -642,14 +673,13 @@ mod tests {
     fn parse_test1() {
         let from_string: RecExpr<EVM> = "(+ x 0)".to_string().parse().unwrap();
         let v1 = EVM::Var(Symbol::from("x"));
-        let v2 = EVM::Num(WrappedU256 {
-            value: U256::zero(),
-        });
+        let v2 = EVM::Num(WrappedU256{value: U256::zero()});
         let mut foo = RecExpr::default();
         let id1 = foo.add(v1);
         let id2 = foo.add(v2);
         let _id3 = foo.add(EVM::Add([id1, id2]));
         assert_eq!(foo, from_string);
+
     }
 
     #[test]
