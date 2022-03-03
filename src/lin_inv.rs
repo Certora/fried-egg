@@ -294,7 +294,7 @@ impl TacOptimizer {
 
     pub fn run(mut self, block_assgns: Vec<EggAssign>) -> Vec<EggAssign> {
         for (index, assign) in block_assgns.iter().enumerate() {
-            self.egraph.analysis.age_map.insert(egg::Symbol::from(assign.lhs.clone()), index);
+            self.egraph.analysis.age_map.insert(egg::Symbol::from(assign.lhs.clone()), index+1);
         }
 
         let mut roots = vec![];
@@ -305,7 +305,23 @@ impl TacOptimizer {
             if let Some(rhs) = &assign.rhs {
                 let id_l = self.egraph.add_expr(&assign.lhs.parse().unwrap());
                 assert!(rhs.len() > 0, "RHS of this assignment is empty!");
-                self.egraph.union_instantiations(&assign.lhs.parse().unwrap(), &rhs.parse().unwrap(), &Default::default(), "assignment");
+                let rhs_parsed: PatternAst<EVM> = rhs.parse().unwrap();
+                // unbound variables have age 0
+                for node in rhs_parsed.as_ref() {
+                    match node {
+                        ENodeOrVar::ENode(node) => {
+                            if let EVM::Var(name) = node {
+                                if self.egraph.analysis.age_map.get(name).is_none() {
+                                    self.egraph.analysis.age_map.insert(name.clone(), 0);
+                                }
+                            }
+                        }
+                        _ => ()
+                    }
+
+                }
+
+                self.egraph.union_instantiations(&assign.lhs.parse().unwrap(), &rhs_parsed, &Default::default(), "assignment");
                 roots.push(id_l);
             } else {
                 roots.push(self.egraph.add_expr(&assign.lhs.parse().unwrap()));
