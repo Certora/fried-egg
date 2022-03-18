@@ -7,6 +7,7 @@ use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
+use rust_evm::evm_utils::I256;
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
@@ -384,7 +385,6 @@ fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 // Entry point
 pub fn start_optimize(assignments: Sexp) -> String {
     let mut ss: Vec<EggAssign> = vec![];
-
     if let Sexp::List(ref list) = assignments {
         for pair in list {
             if let Sexp::List(ref pair_list) = pair {
@@ -524,6 +524,7 @@ mod tests {
         ];
         check_test(input, expected);
     }
+
     #[test]
     fn test7() {
         let input = vec![
@@ -531,6 +532,25 @@ mod tests {
 
         let expected = vec![
             EggAssign::new("R1", "5"),];
+        check_test(input, expected);
+    }
+
+    #[test]
+    fn test8() {
+        let input = vec![
+            EggAssign::new("R7", "tacCalldatasize"),
+            EggAssign::new("R20", "0"),
+            EggAssign::new("R22", "tacCalldatabuf!0"),
+            EggAssign::new("R24", "tacSighash"),
+            EggAssign::new("B28", "(== 1884183503 R24)"),
+        ];
+
+        let expected = vec![
+            EggAssign::new("R7", "tacCalldatasize"),
+            EggAssign::new("R20", "0"),
+            EggAssign::new("R22", "tacCalldatabuf!0"),
+            EggAssign::new("R24", "tacSighash"),
+            EggAssign::new("B28", "(== 1884183503 R24)"),];
         check_test(input, expected);
     }
 
@@ -562,38 +582,4 @@ x2 := havoc
 x1 := x2 + 96 // x1 = x2 + 96
 x3 := x1 - 32 // x3 = x2 + 64
 x4 := x3 - x2 // x4 = 64
-*/
-
-/*
-stuff to investigate
-R2304 = tacM0x40
-R2307 = (+ tacM0x40 32)
-R2310 = (+ tacM0x40 64)
-R2320 = (+ tacM0x40 96)
-R2322 = (+ tacM0x40 128)
-R2328 = (+ tacM0x40 160)
-R2330 = (+ tacM0x40 192)
-R2335 = tacM0x40
-R2349 = (+ tacM0x40 224)
-tacM0x40 = R2349
-R2361 = (+ tacM0x40 256)
-R2395 = (+ tacM0x40 322)
-tacM0x40 = R2395
-R2560 = tacM0x40
-R2564 = (+ 32 R2560)
-tacM0x40.1375 = R2564
-R2565 = tacM0x40.1375
-R2570 = (+ 32 R2565)
-R2574 = (& 255 R1284)
-R2577 = (+ 32 R2570)
-R2581 = (+ 32 R2577)
-R2585 = (+ 32 R2581)
-R2588 = 32
-R2589 = tacM0x40.1375
-R2591 = (- R2589 32)
-R2598 = (- R2585 R2589)
-R2603 = 1
-R2605 = tacRC
-B2608 = (== R2605 0)
-B2614 = (! B2608)
 */
