@@ -4,12 +4,14 @@ use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
 use primitive_types::U256;
-use rust_evm::{eval_evm, EVM};
+use rust_evm::{eval_evm, EVM, WrappedU256};
 use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
+use std::str::FromStr;
 use rust_evm::evm_utils::I256;
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
+use crate::logical_equality::{get_pregenerated_rules, LogicalAnalysis};
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
@@ -30,7 +32,7 @@ pub struct OptParams {
     ////////////////
     #[clap(long, default_value = "5")]
     pub eqsat_iter_limit: usize,
-    #[clap(long, default_value = "100000")]
+    #[clap(long, default_value = "10000")]
     pub eqsat_node_limit: usize,
     ////////////////
     // block from TAC CFG //
@@ -87,7 +89,15 @@ impl egg::CostFunction<EVM> for RHSCostFn<'_> {
             C: FnMut(Id) -> Self::Cost,
     {
         let op_cost = match enode {
-            EVM::Num(_) => 1,
+            EVM::Num(n) => {
+                // if *n == WrappedU256::from_str(&"31").unwrap()
+                //     || *n == WrappedU256::from_str(&"32").unwrap() {
+                //     1
+                // } else {
+                //     10
+                // }
+                1
+            },
             EVM::Var(v) => {
                 if v == &self.lhs {
                     1000
@@ -96,12 +106,17 @@ impl egg::CostFunction<EVM> for RHSCostFn<'_> {
                 } else {
                     100
                 }
-            }
+            },
+            // EVM::Add(_) => 1,
+            // EVM::Sub(_) => 1,
+            // EVM::Mul(_) => 1,
             _ => 5,
         };
         enode.fold(op_cost, |sum, i| sum + costs(i))
     }
 }
+
+
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
@@ -246,28 +261,29 @@ impl Analysis<EVM> for TacAnalysis {
     }
 }
 
-// some standard axioms
 pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
-    let mut uni_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
-        rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
-        rewrite!("commute-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
-        rewrite!("sub-cancel"; "(- ?a ?a)" => "0"),
-        rewrite!("add-neg"; "(+ ?a (- 0 ?a))" => "0"),
-        rewrite!("mul-0"; "(* ?a 0)" => "0"),
-    ];
+    let str_rules = get_pregenerated_rules();
+    let mut res: Vec<Rewrite<EVM, TacAnalysis>> = vec![];
+    for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
+        let lparsed: Pattern<EVM> = lhs.parse().unwrap();
+        let rparsed: Pattern<EVM> = rhs.parse().unwrap();
+        res.push(
+            Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap(),
+        );
+    }
 
-    let mut bi_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
-        rewrite!("add-0"; "(+ ?a 0)" <=> "?a"),
-        rewrite!("sub-0"; "(- ?a 0)" <=> "?a"),
-        rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
-        rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (- 0 ?b))"),
-        rewrite!("add-sub";  "(+ ?a (- 0 ?b))" <=> "(- ?a ?b)"),
-        // rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
-    ]
-        .concat();
+    let manual_bi_rules: Vec<Rewrite<EVM, TacAnalysis>> = vec![
+        rewrite!("commute-eq"; "(== ?a ?b)" <=> "(== ?b ?a)"),
+        // rewrite!("hardcoded-rule1"; "(<< ?a 5)" <=> "(* ?a 32)"),
+        // rewrite!("hardcoded-rule2"; "?a" <=> "(+ 32 (- ?a 32))"),
+        // rewrite!("hardcoded-rule3"; "?a" <=> "(+ ?a (& 32 (- 0 31)))"),
+    ].concat();
 
-    uni_dirs.append(&mut bi_dirs);
-    uni_dirs
+    for rule in manual_bi_rules {
+        res.push(rule);
+    }
+
+    res
 }
 
 // Get the eclass ids for all eclasses in an egraph
@@ -478,7 +494,8 @@ mod tests {
                 lhs: "x2".to_string(),
                 rhs: None,
             },
-            EggAssign::new("x1", "(+ x2 96)"),
+            // EggAssign::new("x1", "(+ x2 96)"),
+            EggAssign::new("x1", "(- x2 115792089237316195423570985008687907853269984665640564039457584007913129639840)"),
             EggAssign::new("x3", "(+ x2 64)"),
             EggAssign::new("x4", "64"),
         ];
@@ -553,6 +570,55 @@ mod tests {
             EggAssign::new("B28", "(== 1884183503 R24)"),];
         check_test(input, expected);
     }
+
+    // R97 = R81<<0x5
+    // R100 = R97+0x3f
+    // R101 = R100&0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0
+
+    /** R101 = (R97 + 63) & ...
+             = ((R81 << 5) + 63) & ...
+
+    */
+
+    #[test]
+    fn test9() {
+        let input = vec![
+            EggAssign::new("R97", "(<< R81 5)"),
+            EggAssign::new("R100", "(+ R97 63)"),
+            EggAssign::new("R101", "(& R100 115792089237316195423570985008687907853269984665640564039457584007913129639904)"),
+        ];
+
+        let expected = vec![
+            EggAssign::new("R97", "(* R81 32)"),
+            EggAssign::new("R100", "(+ R97 63)"),
+            EggAssign::new("R101", "(& R100 115792089237316195423570985008687907853269984665640564039457584007913129639904)"),];
+        check_test(input, expected);
+    }
+
+    #[test]
+    fn test10() {
+        let input = vec![
+            EggAssign::new("R97", "63"),
+        ];
+
+        let expected = vec![
+            EggAssign::new("R97", "(+ 32 31)"),
+        ];
+        check_test(input, expected);
+    }
+
+    #[test]
+    fn test11() {
+        let input = vec![
+            EggAssign::new("R101", "(+ R100 (& 31 115792089237316195423570985008687907853269984665640564039457584007913129639904))"),
+        ];
+
+        let expected = vec![
+            EggAssign::new("R101", "R100"),
+        ];
+        check_test(input, expected);
+    }
+
 
     #[test]
     fn parse_test1() {
