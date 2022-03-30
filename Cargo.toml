@@ -6,9 +6,6 @@ authors = [ "Chandrakana Nandi" ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-name = "tac_optimizer"
-
 [dependencies]
 egg = { git = "ssh://git@github.com/oflatt/egg", rev = "7e53118bee07634b91b3eadddacf96a75f0fccea" }
 etcommon-bigint = "0.2.10"
