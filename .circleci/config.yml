@@ -3,19 +3,6 @@ orbs:
   rust: circleci/rust@1.6.0
 
 commands:
-  # Taken from https://medium.com/@edouard.oger/rust-caching-on-circleci-using-sccache-c996344f0115
-  setup_sccache:
-    steps:
-      - run: sudo apt-get install pkg-config libssl-dev
-      - run:
-          name: Install sccache
-          command: |
-            cargo install sccache
-            # This configures Rust to use sccache.
-            echo 'export "RUSTC_WRAPPER"="sccache"' >> $BASH_ENV
-            # This is the maximum space sccache cache will use on disk.
-            echo 'export "SCCACHE_CACHE_SIZE"="1G"' >> $BASH_ENV
-            sccache --version
   restore_sccache_cache:
     steps:
       - restore_cache:
@@ -36,7 +23,7 @@ commands:
     steps:
       - run:
           name: Install cargo deadlinks
-          command: |
+          command:  |
             curl -L -o ~/.cargo/bin/cargo-deadlinks https://github.com/deadlinks/cargo-deadlinks/releases/download/0.4.2/deadlinks-linux
             chmod +x ~/.cargo/bin/cargo-deadlinks
             cargo deadlinks --version
@@ -55,7 +42,7 @@ commands:
 jobs:
   test:
     docker:
-      - image: cimg/base:stable
+      - image: &img certora/cvt-image:29
 
     steps:
       - checkout
@@ -68,7 +55,7 @@ jobs:
   # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
     docker:
-      - image: cimg/base:stable
+      - image: &img certora/cvt-image:29
 
     steps:
       - checkout
