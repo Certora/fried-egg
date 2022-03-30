@@ -80,10 +80,10 @@ jobs:
         command: |
           rustup component add rustfmt clippy
 	        cargo fmt -- --check
-	        cargo clean --doc
-	        cargo doc --no-deps
-	        cargo deadlinks
-	        cargo clippy
+          cargo clean --doc
+          cargo doc --no-deps
+          cargo deadlinks
+          cargo clippy
 
 
 workflows:
