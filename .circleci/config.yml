@@ -34,10 +34,12 @@ commands:
             - "~/.cache/sccache"
   install_cargo_deadlinks:
     steps:
-      - run: |
-        curl -L -o ~/.cargo/bin/cargo-deadlinks https://github.com/deadlinks/cargo-deadlinks/releases/download/0.4.2/deadlinks-linux
-        chmod +x ~/.cargo/bin/cargo-deadlinks
-        cargo deadlinks --version
+      - run:
+        name: Install cargo deadlinks
+        command: |
+          curl -L -o ~/.cargo/bin/cargo-deadlinks https://github.com/deadlinks/cargo-deadlinks/releases/download/0.4.2/deadlinks-linux
+          chmod +x ~/.cargo/bin/cargo-deadlinks
+          cargo deadlinks --version
   build_fried_egg:
     steps:
       # Build with caching
@@ -73,13 +75,15 @@ jobs:
       - rust/install
       - build_fried_egg
 
-      - run: rustup component add rustfmt clippy
-	    - cargo fmt -- --check
-	    - cargo clean --doc
-	    - cargo doc --no-deps
-	    - cargo deadlinks
-
-	    - cargo clippy
+      - run:
+        name: check nits using clippy and deadlinks
+        command: |
+          rustup component add rustfmt clippy
+	        cargo fmt -- --check
+	        cargo clean --doc
+	        cargo doc --no-deps
+	        cargo deadlinks
+	        cargo clippy
 
 
 workflows:
