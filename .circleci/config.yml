@@ -35,11 +35,11 @@ commands:
   install_cargo_deadlinks:
     steps:
       - run:
-        name: Install cargo deadlinks
-        command: |
-          curl -L -o ~/.cargo/bin/cargo-deadlinks https://github.com/deadlinks/cargo-deadlinks/releases/download/0.4.2/deadlinks-linux
-          chmod +x ~/.cargo/bin/cargo-deadlinks
-          cargo deadlinks --version
+          name: Install cargo deadlinks
+          command: |
+            curl -L -o ~/.cargo/bin/cargo-deadlinks https://github.com/deadlinks/cargo-deadlinks/releases/download/0.4.2/deadlinks-linux
+            chmod +x ~/.cargo/bin/cargo-deadlinks
+            cargo deadlinks --version
   build_fried_egg:
     steps:
       # Build with caching
