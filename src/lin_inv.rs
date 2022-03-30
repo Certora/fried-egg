@@ -110,73 +110,52 @@ impl Analysis<EVM> for TacAnalysis {
 
     fn make(egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM) -> Self::Data {
         let ag = |i: &Id| egraph[*i].data.age;
-        let age: Option<usize>;
-        match enode {
-            EVM::Num(_c) => {
-                age = Some(0);
-            }
-            EVM::Add([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Sub([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Mul([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Div([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
+        let age: Option<usize> = match enode {
+            EVM::Num(_c) => Some(0),
+            EVM::Add([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Sub([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Mul([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Div([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
             EVM::Lt([a, b]) => {
                 //constant = None; // TODO: should change this to fold bools too
-                age = match (ag(a), ag(b)) {
+                match (ag(a), ag(b)) {
                     (Some(x), Some(y)) => Some(max(x, y)),
                     (_, _) => None,
-                };
+                }
             }
-            EVM::Gt([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Le([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Ge([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
+            EVM::Gt([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Le([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Ge([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
             EVM::Var(v) => {
-                age = {
-                    if let Some(age) = egraph.analysis.age_map.get(v) {
-                        Some(*age)
-                    } else {
-                        panic!("Cound not find age for variable {}", v);
-                    }
-                };
+                if let Some(age) = egraph.analysis.age_map.get(v) {
+                    Some(*age)
+                } else {
+                    panic!("Cound not find age for variable {}", v);
+                }
             }
-            _ => {
-                age = None;
-            }
-        }
+            _ => None,
+        };
 
         let mut child_const = vec![];
         enode.for_each(|child| child_const.push(egraph[child].data.constant.as_ref().map(|x| x.0)));
