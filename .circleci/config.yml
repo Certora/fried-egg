@@ -1,6 +1,4 @@
 version: 2.1
-orbs:
-  rust: circleci/rust@1.6.0
 
 commands:
   restore_sccache_cache:
@@ -45,7 +43,6 @@ jobs:
 
     steps:
       - checkout
-      - rust/install
       - build_fried_egg
 
       # Run tests
@@ -58,7 +55,6 @@ jobs:
 
     steps:
       - checkout
-      - rust/install
       - build_fried_egg
       - install_cargo_deadlinks
 
