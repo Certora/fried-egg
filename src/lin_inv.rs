@@ -1,11 +1,9 @@
 use clap::Parser;
 use egg::*;
-use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
 use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
-use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
@@ -50,15 +48,6 @@ impl Default for OptParams {
 pub struct EggAssign {
     pub lhs: String,
     pub rhs: Option<String>,
-}
-
-impl EggAssign {
-    pub fn new(lhs: &str, rhs: &str) -> Self {
-        Self {
-            lhs: lhs.to_string(),
-            rhs: Some(rhs.to_string()),
-        }
-    }
 }
 
 pub struct LHSCostFn;
@@ -123,7 +112,7 @@ impl Analysis<EVM> for TacAnalysis {
         let ag = |i: &Id| egraph[*i].data.age;
         let age: Option<usize>;
         match enode {
-            EVM::Num(c) => {
+            EVM::Num(_c) => {
                 age = Some(0);
             }
             EVM::Add([a, b]) => {
@@ -451,19 +440,6 @@ pub fn start_optimize(assignments: Sexp) -> String {
     // }
 }
 
-pub fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
-    let _ = env_logger::builder().try_init();
-    let actual = start(input);
-    assert_eq!(actual.len(), expected.len());
-    let mut res = true;
-    for (a, e) in actual.iter().zip(expected.iter()) {
-        if res == false {
-            break;
-        }
-        assert_eq!(a.lhs.to_string(), e.lhs.to_string());
-        assert_eq!(a.rhs, e.rhs);
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -471,6 +447,16 @@ mod tests {
     use egg::{RecExpr, Symbol};
     use primitive_types::U256;
     use rust_evm::{eval_evm, WrappedU256, EVM};
+
+    fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
+        let _ = env_logger::builder().try_init();
+        let actual = start(input);
+        assert_eq!(actual.len(), expected.len());
+        for (a, e) in actual.iter().zip(expected.iter()) {
+            assert_eq!(a.lhs.to_string(), e.lhs.to_string());
+            assert_eq!(a.rhs, e.rhs);
+        }
+    }
 
     #[test]
     fn test1() {
