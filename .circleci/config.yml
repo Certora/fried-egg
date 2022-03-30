@@ -61,6 +61,7 @@ jobs:
       - checkout
       - rust/install
       - build_fried_egg
+      - install_cargo_deadlinks
 
       - run:
         name: check nits using clippy and deadlinks
