@@ -203,7 +203,7 @@ impl Analysis<EVM> for TacAnalysis {
         let mut merge_a = false;
         match (to.constant.as_ref(), from.constant) {
             (None, Some(b)) => {
-                to.constant = Some(b.clone());
+                to.constant = Some(b);
                 merge_a = true;
             }
             (None, None) => (),
@@ -212,7 +212,7 @@ impl Analysis<EVM> for TacAnalysis {
         }
         match (to.age, from.age) {
             (None, Some(b)) => {
-                to.age = Some(b.clone());
+                to.age = Some(b);
                 merge_a = true;
             }
             (None, None) => (),
@@ -229,7 +229,7 @@ impl Analysis<EVM> for TacAnalysis {
     fn modify(egraph: &mut EGraph, id: Id) {
         if let Some((c, lhs)) = egraph[id].data.constant.clone() {
             let mut const_pattern = PatternAst::default();
-            const_pattern.add(ENodeOrVar::ENode(EVM::new(c.clone())));
+            const_pattern.add(ENodeOrVar::ENode(EVM::new(c)));
             let (id, _added) = egraph.union_instantiations(
                 &lhs,
                 &const_pattern,
@@ -285,11 +285,10 @@ impl TacOptimizer {
         let analysis = TacAnalysis {
             age_map: Default::default(),
         };
-        let optimizer = Self {
+        Self {
             params,
             egraph: EGraph::new(analysis).with_explanations_enabled(),
-        };
-        optimizer
+        }
     }
 
     pub fn run(mut self, block_assgns: Vec<EggAssign>) -> Vec<EggAssign> {
@@ -307,19 +306,14 @@ impl TacOptimizer {
         for assign in &block_assgns {
             if let Some(rhs) = &assign.rhs {
                 let id_l = self.egraph.add_expr(&assign.lhs.parse().unwrap());
-                assert!(rhs.len() > 0, "RHS of this assignment is empty!");
+                assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
                 let rhs_parsed: PatternAst<EVM> = rhs.parse().unwrap();
                 // unbound variables have age 0
                 for node in rhs_parsed.as_ref() {
-                    match node {
-                        ENodeOrVar::ENode(node) => {
-                            if let EVM::Var(name) = node {
-                                if self.egraph.analysis.age_map.get(name).is_none() {
-                                    self.egraph.analysis.age_map.insert(name.clone(), 0);
-                                }
-                            }
+                    if let ENodeOrVar::ENode(EVM::Var(name)) = node {
+                        if self.egraph.analysis.age_map.get(name).is_none() {
+                            self.egraph.analysis.age_map.insert(*name, 0);
                         }
-                        _ => (),
                     }
                 }
 
@@ -348,48 +342,42 @@ impl TacOptimizer {
         runner.egraph.rebuild();
         log::info!("Done running rules.");
         //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
-        let mut c = 0;
-        for id in roots {
+        for (c, id) in roots.into_iter().enumerate() {
             // TODO: carefully think why we know that the RHS corresponds to this LHS?
             // I think the root ids have the right order but need to be careful.
             let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
             // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
             // let best_l = extract_left.find_best(id).1;
             // check that this is indeed a var.
-            match best_l.as_ref()[0] {
-                EVM::Var(vl) => {
-                    let vl_age = runner.egraph.analysis.age_map.get(&vl).unwrap().clone();
-                    let extract_right = Extractor::new(
-                        &runner.egraph,
-                        RHSCostFn {
-                            age_map: &runner.egraph.analysis.age_map,
-                            age_limit: vl_age,
-                            lhs: vl,
-                        },
-                    );
-                    let best_r = extract_right.find_best(id).1.to_string();
-                    let assg = EggAssign {
-                        lhs: best_l.to_string(),
-                        rhs: if best_r == best_l.to_string() {
-                            None
-                        } else {
-                            Some(best_r.to_string())
-                        },
-                    };
-                    res.push(assg);
-                }
-                _ => (),
+            if let EVM::Var(vl) = best_l.as_ref()[0] {
+                let vl_age = *runner.egraph.analysis.age_map.get(&vl).unwrap();
+                let extract_right = Extractor::new(
+                    &runner.egraph,
+                    RHSCostFn {
+                        age_map: &runner.egraph.analysis.age_map,
+                        age_limit: vl_age,
+                        lhs: vl,
+                    },
+                );
+                let best_r = extract_right.find_best(id).1.to_string();
+                let assg = EggAssign {
+                    lhs: best_l.to_string(),
+                    rhs: if best_r == best_l.to_string() {
+                        None
+                    } else {
+                        Some(best_r.to_string())
+                    },
+                };
+                res.push(assg);
             }
-            c = c + 1;
         }
-        return res;
+        res
     }
 }
 
 fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = OptParams::default();
-    let res = TacOptimizer::new(params).run(ss);
-    res
+    TacOptimizer::new(params).run(ss)
 }
 
 // Entry point

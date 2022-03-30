@@ -9,7 +9,7 @@ use serde_json::Value;
 
 pub fn get_pregenerated_rules() -> Vec<(String, String)> {
     let contents = include_str!("./ruler-rules.json");
-    let json = serde_json::from_str(&contents).unwrap();
+    let json = serde_json::from_str(contents).unwrap();
     match json {
         Value::Object(map) => {
             let eqs = map.get("all_eqs").unwrap();
@@ -141,7 +141,7 @@ impl Analysis<EVM> for LogicalAnalysis {
                     for c in &egraph.analysis.special_constants {
                         cvec.push(*c);
                     }
-                    for _i in 0..(CVEC_LEN.checked_sub(cvec.len()).unwrap_or(0)) {
+                    for _i in 0..(CVEC_LEN.saturating_sub(cvec.len())) {
                         cvec.push(random_256());
                     }
 
@@ -152,8 +152,8 @@ impl Analysis<EVM> for LogicalAnalysis {
                     let mut child_const = vec![];
                     enode.for_each(|child| child_const.push(&egraph[child].data.cvec));
                     for i in 0..CVEC_LEN {
-                        let first = child_const.get(0).map(|v| v.get(i).unwrap().clone());
-                        let second = child_const.get(1).map(|v| v.get(i).unwrap().clone());
+                        let first = child_const.get(0).map(|v| *v.get(i).unwrap());
+                        let second = child_const.get(1).map(|v| *v.get(i).unwrap());
 
                         cvec.push(eval_evm(enode, first, second).unwrap())
                     }
@@ -178,7 +178,7 @@ impl Analysis<EVM> for LogicalAnalysis {
         let mut merge_r = false;
         match (to.constant, from.constant) {
             (None, Some(b)) => {
-                to.constant = Some(b.clone());
+                to.constant = Some(b);
                 merge_l = true;
             }
             (None, None) => (),
@@ -219,9 +219,10 @@ impl LogicalRunner {
             U256::one(),
             U256::zero().overflowing_sub(U256::one()).0,
         ];
-        let mut analysis = LogicalAnalysis::default();
-        analysis.special_constants = constants;
-        analysis.cvec_enabled = true;
+        let analysis = LogicalAnalysis {
+            special_constants: constants,
+            cvec_enabled: true,
+        };
         LogicalRunner {
             egraph: EGraph::new(LogicalAnalysis::default()),
             fuzzing_egraph: EGraph::new(analysis),
@@ -231,19 +232,16 @@ impl LogicalRunner {
 
     fn add_constants(egraph: &mut EGraph, expr: &RecExpr<EVM>) {
         for node in expr.as_ref() {
-            match node {
-                EVM::Num(c) => {
-                    egraph.analysis.special_constants.push(c.value);
-                    egraph
-                        .analysis
-                        .special_constants
-                        .push(c.value.overflowing_add(U256::one()).0);
-                    egraph
-                        .analysis
-                        .special_constants
-                        .push(c.value.overflowing_sub(U256::one()).0);
-                }
-                _ => (),
+            if let EVM::Num(c) = node {
+                egraph.analysis.special_constants.push(c.value);
+                egraph
+                    .analysis
+                    .special_constants
+                    .push(c.value.overflowing_add(U256::one()).0);
+                egraph
+                    .analysis
+                    .special_constants
+                    .push(c.value.overflowing_sub(U256::one()).0);
             }
         }
     }
@@ -265,19 +263,13 @@ impl LogicalRunner {
         self.fuzzing_egraph.rebuild();
         let leftvec = &self.fuzzing_egraph[start_f].data.cvec;
         let rightvec = &self.fuzzing_egraph[end_f].data.cvec;
-        if leftvec != rightvec {
-            true
-        } else {
-            false
-        }
+        leftvec != rightvec
     }
 
     pub fn are_equal(&mut self, lhs: &RecExpr<EVM>, rhs: &RecExpr<EVM>) -> bool {
         let start = self.egraph.add_expr(lhs);
         let end = self.egraph.add_expr(rhs);
-        let result = start == end;
-
-        return result;
+        start == end
     }
 
     pub fn run(&mut self, timeout: u64) {
@@ -290,7 +282,7 @@ impl LogicalRunner {
             .with_hook(move |runner| {
                 let mut done = true;
                 for (expr1, expr2) in &exprs_check {
-                    if runner.egraph.add_expr(&expr1) != runner.egraph.add_expr(&expr2) {
+                    if runner.egraph.add_expr(expr1) != runner.egraph.add_expr(expr2) {
                         done = false;
                         break;
                     }
