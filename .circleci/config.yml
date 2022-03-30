@@ -79,7 +79,7 @@ jobs:
         name: check nits using clippy and deadlinks
         command: |
           rustup component add rustfmt clippy
-	        cargo fmt -- --check
+          cargo fmt -- --check
           cargo clean --doc
           cargo doc --no-deps
           cargo deadlinks
