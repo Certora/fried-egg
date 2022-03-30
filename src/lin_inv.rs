@@ -440,7 +440,6 @@ pub fn start_optimize(assignments: Sexp) -> String {
     // }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
