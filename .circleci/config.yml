@@ -63,6 +63,7 @@ jobs:
       # Run tests
       - run: cargo test --release
   
+  # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
     docker:
       - image: cimg/base:stable
@@ -78,7 +79,7 @@ jobs:
 	    - cargo doc --no-deps
 	    - cargo deadlinks
 
-	    - cargo clippy --tests
+	    - cargo clippy
 
 
 workflows:
