@@ -1,11 +1,9 @@
 use clap::Parser;
 use egg::*;
-use once_cell::sync::Lazy;
 use serde::*;
 // use statement::Stmt;
 use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
-use std::sync::Mutex;
 use std::{cmp::*, collections::HashMap};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
@@ -13,7 +11,7 @@ use symbolic_expressions::Sexp;
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
 // NOTE: this should be "freshness" perhaps. Oldest vars have least age.
-// 
+//
 #[derive(Parser)]
 #[clap(rename_all = "kebab-case")]
 pub enum Command {
@@ -50,12 +48,6 @@ impl Default for OptParams {
 pub struct EggAssign {
     pub lhs: String,
     pub rhs: Option<String>,
-}
-
-impl EggAssign {
-    pub fn new(lhs: &str, rhs: &str) -> Self {
-        Self { lhs: lhs.to_string(), rhs: Some(rhs.to_string())}
-    }
 }
 
 pub struct LHSCostFn;
@@ -110,7 +102,7 @@ pub struct Data {
 
 #[derive(Debug, Clone)]
 pub struct TacAnalysis {
-    pub age_map: HashMap<Symbol, usize>,   
+    pub age_map: HashMap<Symbol, usize>,
 }
 
 impl Analysis<EVM> for TacAnalysis {
@@ -118,73 +110,52 @@ impl Analysis<EVM> for TacAnalysis {
 
     fn make(egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM) -> Self::Data {
         let ag = |i: &Id| egraph[*i].data.age;
-        let age: Option<usize>;
-        match enode {
-            EVM::Num(c) => {
-                age = Some(0);
-            }
-            EVM::Add([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Sub([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Mul([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Div([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
+        let age: Option<usize> = match enode {
+            EVM::Num(_c) => Some(0),
+            EVM::Add([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Sub([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Mul([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Div([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
             EVM::Lt([a, b]) => {
                 //constant = None; // TODO: should change this to fold bools too
-                age = match (ag(a), ag(b)) {
+                match (ag(a), ag(b)) {
                     (Some(x), Some(y)) => Some(max(x, y)),
                     (_, _) => None,
-                };
+                }
             }
-            EVM::Gt([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Le([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
-            EVM::Ge([a, b]) => {
-                age = match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                };
-            }
+            EVM::Gt([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Le([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
+            EVM::Ge([a, b]) => match (ag(a), ag(b)) {
+                (Some(x), Some(y)) => Some(max(x, y)),
+                (_, _) => None,
+            },
             EVM::Var(v) => {
-                age = {
-                    if let Some(age) = egraph.analysis.age_map.get(v) {
-                        Some(*age)
-                    } else {
-                        panic!("Cound not find age for variable {}", v);
-                    }
-                };
+                if let Some(age) = egraph.analysis.age_map.get(v) {
+                    Some(*age)
+                } else {
+                    panic!("Cound not find age for variable {}", v);
+                }
             }
-            _ => {
-                age = None;
-            }
-        }
+            _ => None,
+        };
 
         let mut child_const = vec![];
         enode.for_each(|child| child_const.push(egraph[child].data.constant.as_ref().map(|x| x.0)));
@@ -193,7 +164,11 @@ impl Analysis<EVM> for TacAnalysis {
         let constant_option = eval_evm(enode, *first, *second);
         let constant = if let Some(c) = constant_option {
             let mut expr = PatternAst::default();
-            let top_node = enode.clone().map_children(|child| expr.add(ENodeOrVar::ENode(EVM::new(egraph[child].data.constant.as_ref().unwrap().0))));
+            let top_node = enode.clone().map_children(|child| {
+                expr.add(ENodeOrVar::ENode(EVM::new(
+                    egraph[child].data.constant.as_ref().unwrap().0,
+                )))
+            });
             expr.add(ENodeOrVar::ENode(top_node));
             Some((c, expr))
         } else {
@@ -207,7 +182,7 @@ impl Analysis<EVM> for TacAnalysis {
         let mut merge_a = false;
         match (to.constant.as_ref(), from.constant) {
             (None, Some(b)) => {
-                to.constant = Some(b.clone());
+                to.constant = Some(b);
                 merge_a = true;
             }
             (None, None) => (),
@@ -216,7 +191,7 @@ impl Analysis<EVM> for TacAnalysis {
         }
         match (to.age, from.age) {
             (None, Some(b)) => {
-                to.age = Some(b.clone());
+                to.age = Some(b);
                 merge_a = true;
             }
             (None, None) => (),
@@ -233,9 +208,14 @@ impl Analysis<EVM> for TacAnalysis {
     fn modify(egraph: &mut EGraph, id: Id) {
         if let Some((c, lhs)) = egraph[id].data.constant.clone() {
             let mut const_pattern = PatternAst::default();
-            const_pattern.add(ENodeOrVar::ENode(EVM::new(c.clone())));
-            let (id, _added) = egraph.union_instantiations(&lhs, &const_pattern, &Default::default(), "constant_folding");
-            
+            const_pattern.add(ENodeOrVar::ENode(EVM::new(c)));
+            let (id, _added) = egraph.union_instantiations(
+                &lhs,
+                &const_pattern,
+                &Default::default(),
+                "constant_folding",
+            );
+
             assert!(
                 !egraph[id].nodes.is_empty(),
                 "empty eclass! {:#?}",
@@ -284,16 +264,18 @@ impl TacOptimizer {
         let analysis = TacAnalysis {
             age_map: Default::default(),
         };
-        let optimizer = Self {
+        Self {
             params,
             egraph: EGraph::new(analysis).with_explanations_enabled(),
-        };
-        optimizer
+        }
     }
 
     pub fn run(mut self, block_assgns: Vec<EggAssign>) -> Vec<EggAssign> {
         for (index, assign) in block_assgns.iter().enumerate() {
-            self.egraph.analysis.age_map.insert(egg::Symbol::from(assign.lhs.clone()), index+1);
+            self.egraph
+                .analysis
+                .age_map
+                .insert(egg::Symbol::from(assign.lhs.clone()), index + 1);
         }
 
         let mut roots = vec![];
@@ -303,28 +285,26 @@ impl TacOptimizer {
         for assign in &block_assgns {
             if let Some(rhs) = &assign.rhs {
                 let id_l = self.egraph.add_expr(&assign.lhs.parse().unwrap());
-                assert!(rhs.len() > 0, "RHS of this assignment is empty!");
+                assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
                 let rhs_parsed: PatternAst<EVM> = rhs.parse().unwrap();
                 // unbound variables have age 0
                 for node in rhs_parsed.as_ref() {
-                    match node {
-                        ENodeOrVar::ENode(node) => {
-                            if let EVM::Var(name) = node {
-                                if self.egraph.analysis.age_map.get(name).is_none() {
-                                    self.egraph.analysis.age_map.insert(name.clone(), 0);
-                                }
-                            }
+                    if let ENodeOrVar::ENode(EVM::Var(name)) = node {
+                        if self.egraph.analysis.age_map.get(name).is_none() {
+                            self.egraph.analysis.age_map.insert(*name, 0);
                         }
-                        _ => ()
                     }
-
                 }
 
-                self.egraph.union_instantiations(&assign.lhs.parse().unwrap(), &rhs_parsed, &Default::default(), "assignment");
+                self.egraph.union_instantiations(
+                    &assign.lhs.parse().unwrap(),
+                    &rhs_parsed,
+                    &Default::default(),
+                    "assignment",
+                );
                 roots.push(id_l);
             } else {
                 roots.push(self.egraph.add_expr(&assign.lhs.parse().unwrap()));
-
             }
         }
         log::info!("Done adding terms to the egraph.");
@@ -341,44 +321,42 @@ impl TacOptimizer {
         runner.egraph.rebuild();
         log::info!("Done running rules.");
         //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
-        let mut c = 0;
-        for id in roots {
+        for (c, id) in roots.into_iter().enumerate() {
             // TODO: carefully think why we know that the RHS corresponds to this LHS?
             // I think the root ids have the right order but need to be careful.
             let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
             // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
             // let best_l = extract_left.find_best(id).1;
             // check that this is indeed a var.
-            match best_l.as_ref()[0] {
-                EVM::Var(vl) => {
-                    let vl_age = runner.egraph.analysis.age_map.get(&vl).unwrap().clone();
-                    let extract_right = Extractor::new(
-                        &runner.egraph,
-                        RHSCostFn {
-                            age_map: &runner.egraph.analysis.age_map,
-                            age_limit: vl_age,
-                            lhs: vl,
-                        },
-                    );
-                    let best_r = extract_right.find_best(id).1.to_string();
-                    let assg = EggAssign {
-                        lhs: best_l.to_string(),
-                        rhs: if best_r == best_l.to_string() { None} else { Some(best_r.to_string())},
-                    };
-                    res.push(assg);
-                }
-                _ => (),
+            if let EVM::Var(vl) = best_l.as_ref()[0] {
+                let vl_age = *runner.egraph.analysis.age_map.get(&vl).unwrap();
+                let extract_right = Extractor::new(
+                    &runner.egraph,
+                    RHSCostFn {
+                        age_map: &runner.egraph.analysis.age_map,
+                        age_limit: vl_age,
+                        lhs: vl,
+                    },
+                );
+                let best_r = extract_right.find_best(id).1.to_string();
+                let assg = EggAssign {
+                    lhs: best_l.to_string(),
+                    rhs: if best_r == best_l.to_string() {
+                        None
+                    } else {
+                        Some(best_r.to_string())
+                    },
+                };
+                res.push(assg);
             }
-            c = c + 1;
         }
-        return res;
+        res
     }
 }
 
 fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
     let params: OptParams = OptParams::default();
-    let res = TacOptimizer::new(params).run(ss);
-    res
+    TacOptimizer::new(params).run(ss)
 }
 
 // Entry point
@@ -429,26 +407,22 @@ pub fn start_optimize(assignments: Sexp) -> String {
     // }
 }
 
-pub fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
-    let _ = env_logger::builder().try_init();
-    let actual = start(input);
-    assert_eq!(actual.len(), expected.len());
-    let mut res = true;
-    for (a, e) in actual.iter().zip(expected.iter()) {
-        if res == false {
-            break;
-        }
-        assert_eq!(a.lhs.to_string(), e.lhs.to_string());
-        assert_eq!(a.rhs, e.rhs);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use egg::{RecExpr, Symbol};
     use primitive_types::U256;
     use rust_evm::{eval_evm, WrappedU256, EVM};
+
+    fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
+        let _ = env_logger::builder().try_init();
+        let actual = start(input);
+        assert_eq!(actual.len(), expected.len());
+        for (a, e) in actual.iter().zip(expected.iter()) {
+            assert_eq!(a.lhs.to_string(), e.lhs.to_string());
+            assert_eq!(a.rhs, e.rhs);
+        }
+    }
 
     #[test]
     fn test1() {
@@ -468,7 +442,10 @@ mod tests {
     #[test]
     fn test2() {
         let input = vec![
-            EggAssign { lhs: "x2".to_string(), rhs: None},
+            EggAssign {
+                lhs: "x2".to_string(),
+                rhs: None,
+            },
             EggAssign::new("x1", "(+ x2 96)"),
             EggAssign::new("x3", "(- x1 32)"),
             EggAssign::new("x4", "(- x3 x2)"),
@@ -491,10 +468,7 @@ mod tests {
             EggAssign::new("R1", "64"),
             EggAssign::new("R2", "(+ 32 R1)"),
         ];
-        let expected = vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2", "96"),
-        ];
+        let expected = vec![EggAssign::new("R1", "64"), EggAssign::new("R2", "96")];
         check_test(input, expected);
     }
 
@@ -504,7 +478,8 @@ mod tests {
             EggAssign::new("R1", "64"),
             EggAssign::new("R2", "(- 32 R1)"),
         ];
-        let expected = vec![
+        let expected =
+            vec![
             EggAssign::new("R1", "64"),
             EggAssign::new("R2",
                 "115792089237316195423570985008687907853269984665640564039457584007913129639904"),
@@ -518,19 +493,14 @@ mod tests {
             EggAssign::new("R1", "64"),
             EggAssign::new("R2", "(- R1 32)"),
         ];
-        let expected = vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2", "32"),
-        ];
+        let expected = vec![EggAssign::new("R1", "64"), EggAssign::new("R2", "32")];
         check_test(input, expected);
     }
     #[test]
     fn test7() {
-        let input = vec![
-        EggAssign::new("R1", "(- 5 0)"),];
+        let input = vec![EggAssign::new("R1", "(- 5 0)")];
 
-        let expected = vec![
-        EggAssign::new("R1", "5"),];
+        let expected = vec![EggAssign::new("R1", "5")];
         check_test(input, expected);
     }
 
