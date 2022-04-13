@@ -157,7 +157,10 @@ impl Analysis<EVM> for LogicalAnalysis {
 
                         let res = eval_evm(enode, first, second);
                         if res.is_none() {
-                            panic!("eval_evm for {:?} failed, with children {:?} and {:?}", enode, first, second);
+                            panic!(
+                                "eval_evm for {:?} failed, with children {:?} and {:?}",
+                                enode, first, second
+                            );
                         }
 
                         cvec.push(res.unwrap())
