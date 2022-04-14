@@ -128,7 +128,7 @@ impl Analysis<EVM> for LogicalAnalysis {
     type Data = Data;
 
     fn make(egraph: &EGraph, enode: &EVM) -> Self::Data {
-        // cvec computation turned off because we just do fuzzing
+        // cvecs used for fuzzing in the egraph
         let cvec = if egraph.analysis.cvec_enabled {
             match enode {
                 EVM::Var(_) => {
@@ -145,7 +145,7 @@ impl Analysis<EVM> for LogicalAnalysis {
                         cvec.push(random_256());
                     }
 
-                    cvec
+                    cvec[..CVEC_LEN].to_vec()
                 }
                 _ => {
                     let mut cvec = vec![];
@@ -155,7 +155,15 @@ impl Analysis<EVM> for LogicalAnalysis {
                         let first = child_const.get(0).map(|v| *v.get(i).unwrap());
                         let second = child_const.get(1).map(|v| *v.get(i).unwrap());
 
-                        cvec.push(eval_evm(enode, first, second).unwrap())
+                        let res = eval_evm(enode, first, second);
+                        if res.is_none() {
+                            panic!(
+                                "eval_evm for {:?} failed, with children {:?} and {:?}",
+                                enode, first, second
+                            );
+                        }
+
+                        cvec.push(res.unwrap())
                     }
                     cvec
                 }
