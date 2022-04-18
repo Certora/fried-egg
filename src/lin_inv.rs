@@ -4,7 +4,7 @@ use serde::*;
 // use statement::Stmt;
 use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
-use std::{cmp::*, collections::HashMap};
+use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
@@ -20,7 +20,6 @@ pub enum Command {
     // only one command for now
     Optimize(OptParams),
 }
-
 
 #[derive(Serialize, Deserialize, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -48,6 +47,7 @@ impl Default for OptParams {
     }
 }
 
+#[derive(Debug)]
 pub struct EggAssign {
     pub lhs: String,
     pub rhs: Option<String>,
@@ -55,10 +55,12 @@ pub struct EggAssign {
 
 impl EggAssign {
     pub fn new(lhs: &str, rhs: &str) -> Self {
-        Self {lhs : lhs.to_string(), rhs : Some(rhs.to_string()) }
+        Self {
+            lhs: lhs.to_string(),
+            rhs: Some(rhs.to_string()),
+        }
     }
 }
-
 
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
@@ -365,6 +367,16 @@ impl TacOptimizer {
 }
 
 fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
+    eprintln!("Starting: {:?}", ss);
+
+    let mut seen = HashSet::new();
+    for assign in ss.iter() {
+        if seen.contains(&assign.lhs) {
+            panic!("Duplicate assignment: {:?}", assign);
+        }
+        seen.insert(assign.lhs.clone());
+    }
+
     let params: OptParams = OptParams::default();
     TacOptimizer::new(params).run(ss)
 }

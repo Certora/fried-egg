@@ -79,9 +79,7 @@ pub fn logical_rules<A: Analysis<EVM>>() -> Vec<Rewrite<EVM, A>> {
     for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
         let lparsed: Pattern<EVM> = lhs.parse().unwrap();
         let rparsed: Pattern<EVM> = rhs.parse().unwrap();
-        res.push(
-            Rewrite::<EVM, A>::new(index.to_string(), lparsed, rparsed).unwrap(),
-        );
+        res.push(Rewrite::<EVM, A>::new(index.to_string(), lparsed, rparsed).unwrap());
     }
 
     let manual_rules = vec![
