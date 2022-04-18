@@ -73,14 +73,14 @@ pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
     format!("({} {})", res.0, res.1)
 }
 
-pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
+pub fn logical_rules<A: Analysis<EVM>>() -> Vec<Rewrite<EVM, A>> {
     let str_rules = get_pregenerated_rules();
     let mut res = vec![];
     for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
         let lparsed: Pattern<EVM> = lhs.parse().unwrap();
         let rparsed: Pattern<EVM> = rhs.parse().unwrap();
         res.push(
-            Rewrite::<EVM, LogicalAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap(),
+            Rewrite::<EVM, A>::new(index.to_string(), lparsed, rparsed).unwrap(),
         );
     }
 

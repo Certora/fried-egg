@@ -8,6 +8,8 @@ use std::{cmp::*, collections::HashMap};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
+use crate::logical_equality::logical_rules;
+
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 
 // NOTE: this should be "freshness" perhaps. Oldest vars have least age.
@@ -18,6 +20,7 @@ pub enum Command {
     // only one command for now
     Optimize(OptParams),
 }
+
 
 #[derive(Serialize, Deserialize, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -49,6 +52,13 @@ pub struct EggAssign {
     pub lhs: String,
     pub rhs: Option<String>,
 }
+
+impl EggAssign {
+    pub fn new(lhs: &str, rhs: &str) -> Self {
+        Self {lhs : lhs.to_string(), rhs : Some(rhs.to_string()) }
+    }
+}
+
 
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
@@ -317,7 +327,7 @@ impl TacOptimizer {
             .with_node_limit(self.params.eqsat_node_limit)
             .with_scheduler(egg::SimpleScheduler);
         runner.roots = roots.clone();
-        runner = runner.run(&rules());
+        runner = runner.run(&logical_rules());
         runner.egraph.rebuild();
         log::info!("Done running rules.");
         //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
