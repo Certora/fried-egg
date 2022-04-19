@@ -7,6 +7,7 @@ use rust_evm::{eval_evm, EVM};
 use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
+use num_bigint::BigUint;
 
 use crate::logical_equality::logical_rules;
 
@@ -62,34 +63,54 @@ impl EggAssign {
     }
 }
 
-pub struct LHSCostFn;
-impl egg::CostFunction<EVM> for LHSCostFn {
-    type Cost = usize;
-    fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
-    where
-        C: FnMut(Id) -> Self::Cost,
-    {
-        let op_cost = match enode {
-            EVM::Var(_) => 1,
-            _ => 100,
-        };
-        enode.fold(op_cost, |sum, i| sum + costs(i))
-    }
-}
-
 pub struct RHSCostFn<'a> {
     age_map: &'a HashMap<Symbol, usize>,
     age_limit: usize,
     lhs: Symbol,
 }
 
+// Extract linear expressions by looking for sums of multiplication of variables and constants
 impl egg::CostFunction<EVM> for RHSCostFn<'_> {
-    type Cost = usize;
+    type Cost = BigUint;
     fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
-        let op_cost = match enode {
+        let upper_value = "1000".parse().unwrap();
+        let add_value = "40".parse().unwrap();
+        let mul_value = "20".parse().unwrap();
+        let var_value = "5".parse().unwrap();
+        let num_value = "1".parse().unwrap();
+        match enode {
+            EVM::Num(_) => num_value,
+            EVM::Var(v) => {
+                if v == &self.lhs {
+                    upper_value
+                } else if self.age_map.get(v).unwrap() < &self.age_limit {
+                    var_value
+                } else {
+                    upper_value
+                }
+            },
+            EVM::Mul([child1, child2]) => {
+                let (mut costa, mut costb) = (costs(*child1), costs(*child2));
+                if costb < costa {
+                    std::mem::swap(&mut costa, &mut costb);
+                }
+
+                if costa < var_value && costb < mul_value {
+                    return costa + costb + mul_value;
+                } else {
+                    return costa + costb + upper_value
+                }
+            }
+            EVM::Add(_) => {
+                enode.fold(add_value, |sum, i| sum + costs(i))
+            }
+            _ => enode.fold(upper_value, |sum, i| sum + costs(i))
+        }
+
+        /*let op_cost = match enode {
             EVM::Num(_) => 1,
             EVM::Var(v) => {
                 if v == &self.lhs {
@@ -102,7 +123,7 @@ impl egg::CostFunction<EVM> for RHSCostFn<'_> {
             }
             _ => 5,
         };
-        enode.fold(op_cost, |sum, i| sum + costs(i))
+        enode.fold(op_cost, |sum, i| sum + costs(i))*/
     }
 }
 
@@ -353,11 +374,7 @@ impl TacOptimizer {
                 let best_r = extract_right.find_best(id).1.to_string();
                 let assg = EggAssign {
                     lhs: best_l.to_string(),
-                    rhs: if best_r == best_l.to_string() {
-                        None
-                    } else {
-                        Some(best_r.to_string())
-                    },
+                    rhs: Some(best_r.to_string())
                 };
                 res.push(assg);
             }
@@ -473,10 +490,7 @@ mod tests {
             EggAssign::new("x4", "(- x3 x2)"),
         ];
         let expected = vec![
-            EggAssign {
-                lhs: "x2".to_string(),
-                rhs: None,
-            },
+            EggAssign::new("x2", "x2"),
             EggAssign::new("x1", "(+ x2 96)"),
             EggAssign::new("x3", "(+ x2 64)"),
             EggAssign::new("x4", "64"),
