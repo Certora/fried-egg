@@ -1,11 +1,14 @@
 use clap::Parser;
 use egg::*;
 use serde::*;
+use std::io;
+use std::io::prelude::*;
 // use statement::Stmt;
 use egg::{ENodeOrVar, Pattern, RecExpr};
 use itertools::Itertools;
 use num_bigint::BigUint;
 use primitive_types::U256;
+use rust_evm::WrappedU256;
 use rust_evm::{eval_evm, EVM};
 use std::iter::FromIterator;
 use std::{cmp::*, collections::HashMap, collections::HashSet};
@@ -33,7 +36,7 @@ pub struct OptParams {
     ////////////////
     #[clap(long, default_value = "5")]
     pub eqsat_iter_limit: usize,
-    #[clap(long, default_value = "100000")]
+    #[clap(long, default_value = "10000")]
     pub eqsat_node_limit: usize,
     ////////////////
     // block from TAC CFG //
@@ -131,7 +134,74 @@ impl egg::CostFunction<EVM> for RHSCostFn<'_> {
 #[derive(Default, Debug, Clone)]
 pub struct Data {
     constant: Option<(U256, PatternAst<EVM>)>,
-    age: Option<usize>,
+    linear_terms: Vec<LinearTerm>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LinearTerm {
+    number: U256,
+    variables: Vec<(Symbol, U256)>,
+}
+
+impl LinearTerm {
+    pub fn canonicalize(&self) -> LinearTerm {
+        let mut variables = self.variables.clone();
+        variables.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut new_vars = vec![];
+        if variables.len() > 0 {
+            new_vars.push(variables[0].clone());
+            for var in variables.iter().skip(1) {
+                if var.0 == new_vars.last().unwrap().0 {
+                    new_vars.last_mut().unwrap().1 = eval_evm(
+                        &EVM::Add([Id::from(0), Id::from(0)]),
+                        Some(new_vars.last().unwrap().1),
+                        Some(var.1),
+                    )
+                    .unwrap();
+                } else {
+                    new_vars.push(*var);
+                }
+            }
+        }
+        
+        LinearTerm {
+            number: self.number,
+            variables: new_vars,
+        }
+    }
+
+    pub fn add_canon(&self, other: &LinearTerm) -> LinearTerm {
+        let mut variables = self.variables.clone();
+        variables.extend(other.variables.clone());
+        let number = eval_evm(
+            &EVM::Add([Id::from(0), Id::from(0)]),
+            Some(self.number),
+            Some(other.number),
+        );
+        LinearTerm {
+            number: number.unwrap(),
+            variables,
+        }
+        .canonicalize()
+    }
+
+    pub fn to_expr(&self) -> RecExpr<EVM> {
+        let mut expr = RecExpr::default();
+        expr.add(EVM::Num(WrappedU256 { value: self.number }));
+
+        for variable in &self.variables {
+            let before = expr.as_ref().len();
+            expr.add(EVM::Num(WrappedU256 { value: variable.1 }));
+            let num = expr.as_ref().len();
+            expr.add(EVM::Var(variable.0));
+            let var = expr.as_ref().len();
+            expr.add(EVM::Mul([Id::from(num), Id::from(var)]));
+            let mul = expr.as_ref().len();
+            expr.add(EVM::Add([Id::from(before), Id::from(mul)]));
+        }
+
+        expr
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -143,54 +213,6 @@ impl Analysis<EVM> for TacAnalysis {
     type Data = Data;
 
     fn make(egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM) -> Self::Data {
-        let ag = |i: &Id| egraph[*i].data.age;
-        let age: Option<usize> = match enode {
-            EVM::Num(_c) => Some(0),
-            EVM::Add([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Sub([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Mul([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Div([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Lt([a, b]) => {
-                //constant = None; // TODO: should change this to fold bools too
-                match (ag(a), ag(b)) {
-                    (Some(x), Some(y)) => Some(max(x, y)),
-                    (_, _) => None,
-                }
-            }
-            EVM::Gt([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Le([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Ge([a, b]) => match (ag(a), ag(b)) {
-                (Some(x), Some(y)) => Some(max(x, y)),
-                (_, _) => None,
-            },
-            EVM::Var(v) => {
-                if let Some(age) = egraph.analysis.age_map.get(v) {
-                    Some(*age)
-                } else {
-                    panic!("Cound not find age for variable {}", v);
-                }
-            }
-            _ => None,
-        };
-
         let mut child_const = vec![];
         enode.for_each(|child| child_const.push(egraph[child].data.constant.as_ref().map(|x| x.0)));
         let first = child_const.get(0).unwrap_or(&None);
@@ -209,10 +231,63 @@ impl Analysis<EVM> for TacAnalysis {
             None
         };
 
-        Data { constant, age }
+        let terms = match enode {
+            EVM::Var(v) => vec![LinearTerm {
+                number: "0".parse().unwrap(),
+                variables: vec![(*v, "1".parse().unwrap())],
+            }
+            .canonicalize()],
+            EVM::Num(n) => vec![LinearTerm {
+                number: n.value,
+                variables: vec![],
+            }],
+            EVM::Mul([left, right]) => {
+                if let Some(c) = egraph[*left].data.constant.as_ref() {
+                    let mut terms = vec![];
+                    for term in &egraph[*right].data.linear_terms {
+                        if term.variables.len() == 1 && term.number == "0".parse().unwrap() {
+                            let var = term.variables.get(0).unwrap();
+                            terms.push(
+                                LinearTerm {
+                                    number: c.0,
+                                    variables: vec![(
+                                        var.0,
+                                        eval_evm(enode, Some(c.0), Some(var.1)).unwrap(),
+                                    )],
+                                }
+                                .canonicalize(),
+                            );
+                        }
+                    }
+                    terms
+                } else {
+                    vec![]
+                }
+            }
+
+            EVM::Add([left, right]) => {
+                let mut terms = vec![];
+                for term in &egraph[*left].data.linear_terms {
+                    for term2 in &egraph[*right].data.linear_terms {
+                        terms.push(term.add_canon(term2));
+                    }
+                }
+                terms.sort();
+                terms.dedup();
+                terms
+            }
+
+            _ => vec![],
+        };
+
+        Data {
+            constant,
+            linear_terms: terms,
+        }
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
+        println!("merge {:?} {:?}", to, from);
         let mut merge_a = false;
         match (to.constant.as_ref(), from.constant) {
             (None, Some(b)) => {
@@ -223,17 +298,23 @@ impl Analysis<EVM> for TacAnalysis {
             (Some(_), None) => (),
             (Some(a), Some(b)) => assert_eq!(a.0, b.0),
         }
-        match (to.age, from.age) {
-            (None, Some(b)) => {
-                to.age = Some(b);
-                merge_a = true;
+
+        if let Some(c) = &to.constant {
+            to.linear_terms = vec![LinearTerm {
+                number: c.0,
+                variables: vec![],
+            }];
+        } else {
+            if from.linear_terms.len() > 0 {
+                let before_size = to.linear_terms.len();
+                to.linear_terms.extend(from.linear_terms);
+                to.linear_terms.sort();
+                to.linear_terms.dedup();
+                merge_a = merge_a || to.linear_terms.len() != before_size;
             }
-            (None, None) => (),
-            (Some(_), None) => (),
-            // when two eclasses with different variables are merged,
-            // update the age to be the one of the youngest (largest age value).
-            (Some(a), Some(b)) => to.age = Some(max(a, b)),
         }
+
+        println!("merge_a: {:?}", merge_a);
         DidMerge(merge_a, true)
     }
 
@@ -292,42 +373,26 @@ pub struct TacOptimizer {}
 
 impl TacOptimizer {
     fn find_variables(&self, egraph: &EGraph, id: Id) -> Vec<EVM> {
-        egraph[id]
-            .nodes
-            .clone()
-            .into_iter()
-            .filter(|child| if let EVM::Var(_) = child { true } else { false })
-            .collect()
+        // todo
+        return vec![];
     }
 
     fn find_nonzero_constants(&self, egraph: &EGraph, id: Id) -> Vec<EVM> {
-        egraph[id]
-            .nodes
-            .clone()
-            .into_iter()
-            .filter(|child| {
-                if let EVM::Num(n) = child {
-                    n.value != "0".parse().unwrap()
-                } else {
-                    false
-                }
-            })
-            .collect()
+        if let Some(c) = &egraph[id].data.constant {
+            if c.0 != "0".parse().unwrap() {
+                return vec![EVM::Num(WrappedU256 { value: c.0 })];
+            }
+        }
+        return vec![];
     }
 
     fn find_nonzero_nonone_constants(&self, egraph: &EGraph, id: Id) -> Vec<EVM> {
-        egraph[id]
-            .nodes
-            .clone()
-            .into_iter()
-            .filter(|child| {
-                if let EVM::Num(n) = child {
-                    n.value != "0".parse().unwrap() && n.value != "1".parse().unwrap()
-                } else {
-                    false
-                }
-            })
-            .collect()
+        if let Some(c) = &egraph[id].data.constant {
+            if c.0 != "0".parse().unwrap() && c.0 != "1".parse().unwrap() {
+                return vec![EVM::Num(WrappedU256 { value: c.0 })];
+            }
+        }
+        return vec![];
     }
 
     fn pattern_substitute(
@@ -349,7 +414,12 @@ impl TacOptimizer {
     }
 
     // Attempts to find as many linear equations as possible, and may return some non-linear ones as well
-    fn find_linear_equations(&self, egraph: &EGraph, id: Id, current_variable: EVM) -> Vec<RecExpr<EVM>> {
+    fn find_linear_equations(
+        &self,
+        egraph: &EGraph,
+        id: Id,
+        current_variable: EVM,
+    ) -> Vec<RecExpr<EVM>> {
         // Non-zero constant variables
         let const_variables: HashSet<Var> = HashSet::from_iter(
             vec!["?c", "?m", "?n"]
@@ -370,21 +440,21 @@ impl TacOptimizer {
         );
 
         let searchers: Vec<Pattern<EVM>> = vec![
-            "0",         // zero
-            "?c",        // non-zero constants
-            "?x",        // variables
-            "(+ ?x ?y)", // two variables
-            "(+ ?c ?y)", // constant and variable
-            "(+ (* ?c1 ?x) ?c)", // constant and variable multiple
-            "(+ (* ?c1 ?x) ?y)", // two variables
-            "(+ (* ?c1 ?x) (* ?m1 ?y))", // two variables with multipliers
-            "(+ ?x (+ ?y ?z))",                         // three variables
-            "(+ ?c (+ ?y ?z))",                         // one constant, two variables
-            "(+ (* ?c1 ?x) (+ ?x ?y))",                 // three variables
-            "(+ (* ?c1 ?x) (+ ?y ?c))",                 // two vars, one constant
-            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) ?z))",         // three variables
-            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) ?c))",         // two variables, one constant
-            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) (* ?n1 ?z)))", // three variables
+            "0",                                // zero
+            "?c",                               // non-zero constants
+            "?x",                               // variables
+            "(+ ?x ?y)",                        // two variables
+            "(+ ?c ?y)",                        // constant and variable
+            "(+ (* ?c1 ?x) ?c)",                // constant and variable multiple
+            "(+ (* ?c1 ?x) ?y)",                // two variables
+            "(+ (* ?c1 ?x) (* ?m1 ?y))",        // two variables with multipliers
+            "(+ ?x (+ ?y ?z))",                 // three variables
+            "(+ ?c (+ ?y ?z))",                 // one constant, two variables
+            "(+ (* ?c1 ?x) (+ ?x ?y))",         // three variables
+            "(+ (* ?c1 ?x) (+ ?y ?c))",         // two vars, one constant
+            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) ?z))", // three variables
+            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) ?c))", // two variables, one constant
+                                                //"(+ (* ?c1 ?x) (+ (* ?m1 ?y) (* ?n1 ?z)))", // three variables
         ]
         .into_iter()
         .map(|s| s.parse().unwrap())
@@ -421,6 +491,7 @@ impl TacOptimizer {
                         possibilities.push(nodes);
                     }
 
+                    println!("{:?}", possibilities);
                     for product in possibilities
                         .into_iter()
                         .map(|v| v.into_iter())
@@ -506,7 +577,11 @@ impl TacOptimizer {
             // check that this is indeed a var.
             if let EVM::Var(_) = current_var {
                 let l_string = best_l.to_string();
-                let candidates = self.find_linear_equations(&runner.egraph, id, best_l.as_ref()[0].clone());
+                let candidates = runner.egraph[id]
+                    .data
+                    .linear_terms
+                    .iter()
+                    .map(|t| t.to_expr());
                 for expr in candidates {
                     res.push(EggAssign {
                         lhs: l_string.clone(),
@@ -533,7 +608,7 @@ impl TacOptimizer {
             } else {
                 panic!("Expected variable on lhs: got {:?}", best_l);
             }
-        } 
+        }
         res
     }
 }
@@ -612,7 +687,6 @@ mod tests {
         let actualSet: HashSet<EggAssign> = HashSet::from_iter(actual.into_iter());
         let expectedSet: HashSet<EggAssign> = HashSet::from_iter(expected.into_iter());
 
-        
         assert!(expectedSet.is_subset(&actualSet));
     }
 
@@ -657,11 +731,7 @@ mod tests {
             EggAssign::new("R1", "64"),
             EggAssign::new("R2", "(+ 32 R1)"),
         ];
-        let expected = vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2", "96"),
-            EggAssign::new("R2", "(+ 32 R1)"),
-        ];
+        let expected = vec![EggAssign::new("R1", "64"), EggAssign::new("R2", "96")];
         check_test(input, expected);
     }
 
@@ -689,7 +759,7 @@ mod tests {
         let expected = vec![EggAssign::new("R1", "64"), EggAssign::new("R2", "32")];
         check_test(input, expected);
     }
-    
+
     #[test]
     fn test7() {
         let input = vec![EggAssign::new("R1", "(- 5 0)")];
