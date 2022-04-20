@@ -21,6 +21,7 @@ rust-evm = { git = "ssh://git@github.com/Certora/rust-evm", rev = "dbaf3068cafe8
 symbolic_expressions = "5.0.3"
 num = "0.3"
 num-bigint = { version = "0.3", features = ["rand"] }
+itertools = "0.10.3"
 
 
 
