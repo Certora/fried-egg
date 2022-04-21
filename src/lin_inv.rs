@@ -147,19 +147,20 @@ impl LinearTerm {
     pub fn canonicalize(&self) -> LinearTerm {
         let mut variables = self.variables.clone();
         variables.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut new_vars = vec![];
+        let mut new_vars: Vec<(Symbol, U256)> = vec![];
         if variables.len() > 0 {
-            new_vars.push(variables[0].clone());
-            for var in variables.iter().skip(1) {
-                if var.0 == new_vars.last().unwrap().0 {
-                    new_vars.last_mut().unwrap().1 = eval_evm(
-                        &EVM::Add([Id::from(0), Id::from(0)]),
-                        Some(new_vars.last().unwrap().1),
-                        Some(var.1),
-                    )
-                    .unwrap();
-                } else {
-                    new_vars.push(*var);
+            for var in variables.iter() {
+                if var.1 != "0".parse().unwrap() {
+                    if new_vars.len() > 0 && var.0 == new_vars.last().unwrap().0 {
+                        new_vars.last_mut().unwrap().1 = eval_evm(
+                            &EVM::Add([Id::from(0), Id::from(0)]),
+                            Some(new_vars.last().unwrap().1),
+                            Some(var.1),
+                        )
+                        .unwrap();
+                    } else {
+                        new_vars.push(*var);
+                    }
                 }
             }
         }
@@ -187,17 +188,22 @@ impl LinearTerm {
 
     pub fn to_expr(&self) -> RecExpr<EVM> {
         let mut expr = RecExpr::default();
-        expr.add(EVM::Num(WrappedU256 { value: self.number }));
+        if self.number != "0".parse().unwrap() {
+            expr.add(EVM::Num(WrappedU256 { value: self.number }));
+        }
 
         for variable in &self.variables {
             let before = expr.as_ref().len();
             expr.add(EVM::Num(WrappedU256 { value: variable.1 }));
-            let num = expr.as_ref().len();
+            let num = expr.as_ref().len()-1;
             expr.add(EVM::Var(variable.0));
-            let var = expr.as_ref().len();
+            let var = expr.as_ref().len()-1;
             expr.add(EVM::Mul([Id::from(num), Id::from(var)]));
-            let mul = expr.as_ref().len();
-            expr.add(EVM::Add([Id::from(before), Id::from(mul)]));
+            let mul = expr.as_ref().len()-1;
+
+            if before != 0 {
+                expr.add(EVM::Add([Id::from(before-1), Id::from(mul)]));
+            }
         }
 
         expr
@@ -243,23 +249,27 @@ impl Analysis<EVM> for TacAnalysis {
             }],
             EVM::Mul([left, right]) => {
                 if let Some(c) = egraph[*left].data.constant.as_ref() {
-                    let mut terms = vec![];
-                    for term in &egraph[*right].data.linear_terms {
-                        if term.variables.len() == 1 && term.number == "0".parse().unwrap() {
-                            let var = term.variables.get(0).unwrap();
-                            terms.push(
-                                LinearTerm {
-                                    number: c.0,
-                                    variables: vec![(
-                                        var.0,
-                                        eval_evm(enode, Some(c.0), Some(var.1)).unwrap(),
-                                    )],
-                                }
-                                .canonicalize(),
-                            );
+                    if c.0 > "0".parse().unwrap() {
+                        let mut terms = vec![];
+                        for term in &egraph[*right].data.linear_terms {
+                            if term.variables.len() == 1 && term.number == "0".parse().unwrap() {
+                                let var = term.variables.get(0).unwrap();
+                                terms.push(
+                                    LinearTerm {
+                                        number: "0".parse().unwrap(),
+                                        variables: vec![(
+                                            var.0,
+                                            eval_evm(enode, Some(c.0), Some(var.1)).unwrap(),
+                                        )],
+                                    }
+                                    .canonicalize(),
+                                );
+                            }
                         }
+                        terms
+                    } else {
+                        vec![]
                     }
-                    terms
                 } else {
                     vec![]
                 }
@@ -287,7 +297,6 @@ impl Analysis<EVM> for TacAnalysis {
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
-        println!("merge {:?} {:?}", to, from);
         let mut merge_a = false;
         match (to.constant.as_ref(), from.constant) {
             (None, Some(b)) => {
@@ -314,7 +323,6 @@ impl Analysis<EVM> for TacAnalysis {
             }
         }
 
-        println!("merge_a: {:?}", merge_a);
         DidMerge(merge_a, true)
     }
 
@@ -491,7 +499,6 @@ impl TacOptimizer {
                         possibilities.push(nodes);
                     }
 
-                    println!("{:?}", possibilities);
                     for product in possibilities
                         .into_iter()
                         .map(|v| v.into_iter())
@@ -575,7 +582,7 @@ impl TacOptimizer {
             // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
             // let best_l = extract_left.find_best(id).1;
             // check that this is indeed a var.
-            if let EVM::Var(_) = current_var {
+            if let EVM::Var(vl) = current_var {
                 let l_string = best_l.to_string();
                 let candidates = runner.egraph[id]
                     .data
@@ -683,7 +690,7 @@ mod tests {
 
     fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
         let actual = start(input);
-        println!("Actual: {:#?}", actual);
+        println!("{:#?}", actual);
         let actualSet: HashSet<EggAssign> = HashSet::from_iter(actual.into_iter());
         let expectedSet: HashSet<EggAssign> = HashSet::from_iter(expected.into_iter());
 
@@ -717,9 +724,8 @@ mod tests {
             EggAssign::new("x4", "(- x3 x2)"),
         ];
         let expected = vec![
-            EggAssign::new("x2", "x2"),
-            EggAssign::new("x1", "(+ x2 96)"),
-            EggAssign::new("x3", "(+ x2 64)"),
+            EggAssign::new("x1", "(+ 96 (* 1 x2))"),
+            EggAssign::new("x3", "(+ 64 (* 1 x2))"),
             EggAssign::new("x4", "64"),
         ];
         check_test(input, expected);
