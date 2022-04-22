@@ -69,14 +69,11 @@ impl EggAssign {
     }
 }
 
-pub struct RHSCostFn<'a> {
-    age_map: &'a HashMap<Symbol, usize>,
-    age_limit: usize,
-    lhs: Symbol,
+pub struct RHSCostFn {
 }
 
 // Extract linear expressions by looking for sums of multiplication of variables and constants
-impl egg::CostFunction<EVM> for RHSCostFn<'_> {
+impl egg::CostFunction<EVM> for RHSCostFn {
     type Cost = BigUint;
     fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
     where
@@ -90,13 +87,14 @@ impl egg::CostFunction<EVM> for RHSCostFn<'_> {
         match enode {
             EVM::Num(_) => num_value,
             EVM::Var(v) => {
-                if v == &self.lhs {
+                var_value
+                /*if v == &self.lhs {
                     upper_value
                 } else if self.age_map.get(v).unwrap() < &self.age_limit {
                     var_value
                 } else {
                     upper_value
-                }
+                }*/
             }
             EVM::Mul([child1, child2]) => {
                 let (mut costa, mut costb) = (costs(*child1), costs(*child2));
@@ -519,7 +517,6 @@ impl TacOptimizer {
     }
 
     pub fn run(self, params: OptParams, block_assgns: Vec<EggAssign>) -> Vec<EggAssign> {
-        let age_map: HashMap<Symbol, usize> = Default::default();
         let analysis = TacAnalysis {
             age_map: Default::default(),
         };
@@ -531,33 +528,33 @@ impl TacOptimizer {
                 .insert(egg::Symbol::from(assign.lhs.clone()), index + 1);
         }
 
-        let mut roots = vec![];
-        let mut res = vec![];
+        let mut variable_roots: HashMap<Symbol, Id> = Default::default();
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
         for assign in &block_assgns {
             if let Some(rhs) = &assign.rhs {
-                let id_l = egraph.add_expr(&assign.lhs.parse().unwrap());
                 assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
-                let rhs_parsed: PatternAst<EVM> = rhs.parse().unwrap();
-                // unbound variables have age 0
+                let rhs_parsed: RecExpr<EVM> = rhs.parse().unwrap();
+                let mut rhs_pattern: PatternAst<EVM> = Default::default();
+                let mut subst = Subst::default();
+                let mut subst_size = 0;
                 for node in rhs_parsed.as_ref() {
-                    if let ENodeOrVar::ENode(EVM::Var(name)) = node {
-                        if egraph.analysis.age_map.get(name).is_none() {
-                            egraph.analysis.age_map.insert(*name, 0);
+                    if let EVM::Var(name) = node {
+                        // add unbound variables to the egraph
+                        if variable_roots.get(name).is_none() {
+                            variable_roots.insert(*name, egraph.add(node.clone()));
                         }
+                        let var = ("?".to_string() + &format!("{}", subst_size)).parse().unwrap();
+                        subst.insert(var, *variable_roots.get(name).unwrap());
+                        subst_size += 1;
+                        rhs_pattern.add(ENodeOrVar::Var(var));
+                    } else {
+                        rhs_pattern.add(ENodeOrVar::ENode(node.clone()));
                     }
                 }
 
-                egraph.union_instantiations(
-                    &assign.lhs.parse().unwrap(),
-                    &rhs_parsed,
-                    &Default::default(),
-                    "assignment",
-                );
-                roots.push(id_l);
-            } else {
-                roots.push(egraph.add_expr(&assign.lhs.parse().unwrap()));
+                let id = egraph.add_instantiation(&rhs_pattern, &subst);
+                variable_roots.insert(assign.lhs.parse().unwrap(), id);
             }
         }
         log::info!("Done adding terms to the egraph.");
@@ -569,52 +566,26 @@ impl TacOptimizer {
             .with_iter_limit(params.eqsat_iter_limit)
             .with_node_limit(params.eqsat_node_limit)
             .with_scheduler(egg::SimpleScheduler);
-        runner.roots = roots.clone();
         runner = runner.run(&logical_rules());
-        runner.egraph.rebuild();
         log::info!("Done running rules.");
-        //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
-        for (c, id) in roots.into_iter().enumerate() {
-            // TODO: carefully think why we know that the RHS corresponds to this LHS?
-            // I think the root ids have the right order but need to be careful.
-            let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
-            let current_var = best_l.as_ref()[0].clone();
-            // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
-            // let best_l = extract_left.find_best(id).1;
-            // check that this is indeed a var.
-            if let EVM::Var(vl) = current_var {
-                let l_string = best_l.to_string();
-                let candidates = runner.egraph[id]
-                    .data
-                    .linear_terms
-                    .iter()
-                    .map(|t| t.to_expr());
-                for expr in candidates {
-                    res.push(EggAssign {
-                        lhs: l_string.clone(),
-                        rhs: Some(expr.to_string()),
-                    });
-                }
 
-                // old way- extract something linear
-                /*let vl_age = *runner.egraph.analysis.age_map.get(&vl).unwrap();
-                let extract_right = Extractor::new(
-                    &runner.egraph,
-                    RHSCostFn {
-                        age_map: &runner.egraph.analysis.age_map,
-                        age_limit: vl_age,
-                        lhs: vl,
-                    },
-                );
-                let best_r = extract_right.find_best(id).1.to_string();
-                let assg = EggAssign {
-                    lhs: best_l.to_string(),
-                    rhs: Some(best_r.to_string())
-                };
-                res.push(assg);*/
-            } else {
-                panic!("Expected variable on lhs: got {:?}", best_l);
-            }
+        let mut res = vec![];
+        let extract_right = Extractor::new(
+            &runner.egraph,
+            RHSCostFn {
+            },
+        );
+        //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
+        for assign in &block_assgns {
+            let current_var: Symbol = assign.lhs.parse().unwrap();
+            let id = variable_roots.get(&current_var).unwrap();
+            
+            let best_r = extract_right.find_best(*id).1.to_string();
+            let assg = EggAssign {
+                lhs: current_var.to_string(),
+                rhs: Some(best_r.to_string())
+            };
+            res.push(assg);
         }
         res
     }
@@ -715,17 +686,13 @@ mod tests {
     #[test]
     fn test2() {
         let input = vec![
-            EggAssign {
-                lhs: "x2".to_string(),
-                rhs: None,
-            },
             EggAssign::new("x1", "(+ x2 96)"),
             EggAssign::new("x3", "(- x1 32)"),
             EggAssign::new("x4", "(- x3 x2)"),
         ];
         let expected = vec![
-            EggAssign::new("x1", "(+ 96 (* 1 x2))"),
-            EggAssign::new("x3", "(+ 64 (* 1 x2))"),
+            EggAssign::new("x1", "(+ x2 96)"),
+            EggAssign::new("x3", "(+ x2 64)"),
             EggAssign::new("x4", "64"),
         ];
         check_test(input, expected);
