@@ -57,23 +57,53 @@ impl Default for OptParams {
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct EggAssign {
     pub lhs: String,
-    pub rhs: Option<String>,
+    pub rhs: String,
+    pub indexWrites: Vec<String>,
+    pub nextFp: String,
 }
 
 impl EggAssign {
     pub fn new(lhs: &str, rhs: &str) -> Self {
         Self {
             lhs: lhs.to_string(),
-            rhs: Some(rhs.to_string()),
+            rhs: rhs.to_string(),
+            indexWrites: vec![],
+            nextFp: "noNextFp".to_string(),
         }
     }
 }
 
-pub struct RHSCostFn {
+pub struct LinearCostFn {}
+
+pub struct GeneralCostFn {}
+
+impl egg::CostFunction<EVM> for GeneralCostFn {
+    type Cost = BigUint;
+    fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
+    where
+        C: FnMut(Id) -> Self::Cost,
+    {
+        let basic_cost = "5".parse().unwrap();
+        let var_value = "5".parse().unwrap();
+        let num_value = "2".parse().unwrap();
+        let complex_cost = "20".parse().unwrap();
+        match enode {
+            EVM::Num(n) => if n.value < "1000".parse().unwrap() {
+                "1".parse().unwrap()
+            } else  {
+                num_value
+            },
+            EVM::Var(_) => var_value,
+            EVM::Div(_) => enode.fold(complex_cost, |sum, i| sum + costs(i)),
+            EVM::Exp(_) => enode.fold(complex_cost, |sum, i| sum + costs(i)),
+            _ => enode.fold(basic_cost, |sum, i| sum + costs(i)),
+        }
+    }
+
 }
 
 // Extract linear expressions by looking for sums of multiplication of variables and constants
-impl egg::CostFunction<EVM> for RHSCostFn {
+impl egg::CostFunction<EVM> for LinearCostFn {
     type Cost = BigUint;
     fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
     where
@@ -83,19 +113,14 @@ impl egg::CostFunction<EVM> for RHSCostFn {
         let add_value = "40".parse().unwrap();
         let mul_value = "20".parse().unwrap();
         let var_value = "5".parse().unwrap();
-        let num_value = "1".parse().unwrap();
+        let num_value = "2".parse().unwrap();
         match enode {
-            EVM::Num(_) => num_value,
-            EVM::Var(v) => {
-                var_value
-                /*if v == &self.lhs {
-                    upper_value
-                } else if self.age_map.get(v).unwrap() < &self.age_limit {
-                    var_value
-                } else {
-                    upper_value
-                }*/
-            }
+            EVM::Num(n) => if n.value < "1000".parse().unwrap() {
+                "1".parse().unwrap()
+            } else  {
+                num_value
+            },
+            EVM::Var(_) => var_value,
             EVM::Mul([child1, child2]) => {
                 let (mut costa, mut costb) = (costs(*child1), costs(*child2));
                 if costb < costa {
@@ -109,29 +134,15 @@ impl egg::CostFunction<EVM> for RHSCostFn {
                 }
             }
             EVM::Add(_) => enode.fold(add_value, |sum, i| sum + costs(i)),
+            EVM::Sub(_) => enode.fold(add_value, |sum, i| sum + costs(i)),
             _ => enode.fold(upper_value, |sum, i| sum + costs(i)),
         }
-
-        /*let op_cost = match enode {
-            EVM::Num(_) => 1,
-            EVM::Var(v) => {
-                if v == &self.lhs {
-                    1000
-                } else if self.age_map.get(v).unwrap() < &self.age_limit {
-                    10
-                } else {
-                    100
-                }
-            }
-            _ => 5,
-        };
-        enode.fold(op_cost, |sum, i| sum + costs(i))*/
     }
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
-    constant: Option<(U256, PatternAst<EVM>)>,
+    constant: Option<(U256, PatternAst<EVM>, Subst)>,
     linear_terms: Vec<LinearTerm>,
 }
 
@@ -162,7 +173,7 @@ impl LinearTerm {
                 }
             }
         }
-        
+
         LinearTerm {
             number: self.number,
             variables: new_vars,
@@ -193,14 +204,14 @@ impl LinearTerm {
         for variable in &self.variables {
             let before = expr.as_ref().len();
             expr.add(EVM::Num(WrappedU256 { value: variable.1 }));
-            let num = expr.as_ref().len()-1;
+            let num = expr.as_ref().len() - 1;
             expr.add(EVM::Var(variable.0));
-            let var = expr.as_ref().len()-1;
+            let var = expr.as_ref().len() - 1;
             expr.add(EVM::Mul([Id::from(num), Id::from(var)]));
-            let mul = expr.as_ref().len()-1;
+            let mul = expr.as_ref().len() - 1;
 
             if before != 0 {
-                expr.add(EVM::Add([Id::from(before-1), Id::from(mul)]));
+                expr.add(EVM::Add([Id::from(before - 1), Id::from(mul)]));
             }
         }
 
@@ -224,13 +235,20 @@ impl Analysis<EVM> for TacAnalysis {
         let constant_option = eval_evm(enode, *first, *second);
         let constant = if let Some(c) = constant_option {
             let mut expr = PatternAst::default();
+            let mut subst = Subst::default();
             let top_node = enode.clone().map_children(|child| {
-                expr.add(ENodeOrVar::ENode(EVM::new(
-                    egraph[child].data.constant.as_ref().unwrap().0,
-                )))
+                if egraph[child].data.constant.is_none() {
+                    let var = format!("?{}", child).parse().unwrap();
+                    subst.insert(var, child);
+                    expr.add(ENodeOrVar::Var(var))
+                } else {
+                    expr.add(ENodeOrVar::ENode(EVM::new(
+                        egraph[child].data.constant.as_ref().unwrap().0,
+                    )))
+                }
             });
             expr.add(ENodeOrVar::ENode(top_node));
-            Some((c, expr))
+            Some((c, expr, subst))
         } else {
             None
         };
@@ -327,13 +345,13 @@ impl Analysis<EVM> for TacAnalysis {
     // We don't modify the eclass based on variable age.
     // Just add the constants we get from constant folding.
     fn modify(egraph: &mut EGraph, id: Id) {
-        if let Some((c, lhs)) = egraph[id].data.constant.clone() {
+        if let Some((c, lhs, subst)) = egraph[id].data.constant.clone() {
             let mut const_pattern = PatternAst::default();
             const_pattern.add(ENodeOrVar::ENode(EVM::new(c)));
             let (id, _added) = egraph.union_instantiations(
                 &lhs,
                 &const_pattern,
-                &Default::default(),
+                &subst,
                 "constant_folding",
             );
 
@@ -532,33 +550,38 @@ impl TacOptimizer {
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
         for assign in &block_assgns {
-            if let Some(rhs) = &assign.rhs {
-                assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
-                let rhs_parsed: RecExpr<EVM> = rhs.parse().unwrap();
-                let mut rhs_pattern: PatternAst<EVM> = Default::default();
-                let mut subst = Subst::default();
-                let mut subst_size = 0;
-                for node in rhs_parsed.as_ref() {
-                    if let EVM::Var(name) = node {
-                        // add unbound variables to the egraph
-                        if variable_roots.get(name).is_none() {
-                            variable_roots.insert(*name, egraph.add(node.clone()));
-                        }
-                        let var = ("?".to_string() + &format!("{}", subst_size)).parse().unwrap();
-                        subst.insert(var, *variable_roots.get(name).unwrap());
-                        subst_size += 1;
-                        rhs_pattern.add(ENodeOrVar::Var(var));
-                    } else {
-                        rhs_pattern.add(ENodeOrVar::ENode(node.clone()));
+            let rhs = assign.rhs.clone();
+            assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
+            let rhs_parsed: RecExpr<EVM> = rhs.parse().unwrap();
+            let mut rhs_pattern: PatternAst<EVM> = Default::default();
+            let mut subst = Subst::default();
+            let mut subst_size = 0;
+            for node in rhs_parsed.as_ref() {
+                if let EVM::Var(name) = node {
+                    // add unbound variables to the egraph
+                    if variable_roots.get(name).is_none() {
+                        variable_roots.insert(*name, egraph.add(node.clone()));
                     }
+                    let var = ("?".to_string() + &format!("{}", subst_size))
+                        .parse()
+                        .unwrap();
+                    subst.insert(var, *variable_roots.get(name).unwrap());
+                    subst_size += 1;
+                    rhs_pattern.add(ENodeOrVar::Var(var));
+                } else {
+                    rhs_pattern.add(ENodeOrVar::ENode(node.clone()));
                 }
-
-                let id = egraph.add_instantiation(&rhs_pattern, &subst);
-                variable_roots.insert(assign.lhs.parse().unwrap(), id);
             }
+
+            let id = egraph.add_instantiation(&rhs_pattern, &subst);
+            variable_roots.insert(assign.lhs.parse().unwrap(), id);
         }
         log::info!("Done adding terms to the egraph.");
-        egraph.rebuild();
+
+        // put all the byte queries in
+        for assign in &block_assgns {
+            is_byte_array_length_computation(&variable_roots, &mut egraph, &assign);
+        }
 
         // run eqsat with the domain rules
         let mut runner: Runner<EVM, TacAnalysis> = Runner::new(egraph.analysis.clone())
@@ -569,26 +592,57 @@ impl TacOptimizer {
         runner = runner.run(&logical_rules());
         log::info!("Done running rules.");
 
-        let mut res = vec![];
-        let extract_right = Extractor::new(
-            &runner.egraph,
-            RHSCostFn {
-            },
-        );
-        //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
+        let mut keep_same = vec![];
         for assign in &block_assgns {
+            keep_same.push(is_byte_array_length_computation(&variable_roots, &mut runner.egraph, assign))
+        }
+
+        let mut res = vec![];
+        let extract_linear = Extractor::new(&runner.egraph, LinearCostFn {});
+        let extract_ordinary = Extractor::new(&runner.egraph, GeneralCostFn {});
+        //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
+        for (assign, keep_this_same) in block_assgns.iter().zip(keep_same.iter()) {
             let current_var: Symbol = assign.lhs.parse().unwrap();
             let id = variable_roots.get(&current_var).unwrap();
             
-            let best_r = extract_right.find_best(*id).1.to_string();
-            let assg = EggAssign {
-                lhs: current_var.to_string(),
-                rhs: Some(best_r.to_string())
+            let best_r = if *keep_this_same {
+                assign.rhs.clone()
+            } else {
+                let (cost1, best1) = extract_linear.find_best(*id);
+                let (cost2, best2) = extract_ordinary.find_best(*id);
+                let factor: BigUint = "4".parse().unwrap();
+                if cost1 < cost2 * factor {
+                    best1.to_string()
+                } else {
+                    best2.to_string()
+                }
             };
+            let assg = EggAssign::new(&current_var.to_string(), &best_r.to_string());
             res.push(assg);
         }
         res
     }
+}
+
+fn is_byte_array_length_computation(variable_roots: &HashMap<Symbol, Id>, egraph: &mut EGraph, assignment: &EggAssign) -> bool {
+    assignment.indexWrites.iter().any(|write| {
+        let lhs_id = variable_roots.get(&assignment.lhs.parse().unwrap());
+        let nextfp_id = variable_roots.get(&assignment.nextFp.parse().unwrap());
+        let write_id = variable_roots.get(&write.parse().unwrap());
+        if lhs_id == None || nextfp_id == None || write_id == None {
+            return false;
+        }
+        let mut left_subst = Subst::default();
+        left_subst.insert("lhs".parse().unwrap(), *lhs_id.unwrap());
+        let mut right_subst = Subst::default();
+        right_subst.insert("nextFp".parse().unwrap(), *nextfp_id.unwrap());
+        right_subst.insert("write".parse().unwrap(), *write_id.unwrap());
+
+        let left = egraph.add_instantiation(&"(+ ?lhs 32)".parse().unwrap(), &left_subst);
+        let right = egraph.add_instantiation(&"(- ?nextFp ?write)".parse().unwrap(), &right_subst);
+
+        left == right
+    })
 }
 
 fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
@@ -611,16 +665,29 @@ pub fn start_optimize(assignments: Sexp) -> String {
     if let Sexp::List(ref list) = assignments {
         for pair in list {
             if let Sexp::List(ref pair_list) = pair {
-                let option_pair = (pair_list.get(0), pair_list.get(1));
-                if let (Some(Sexp::String(lhs)), Some(rhs)) = option_pair {
+                assert_eq!(pair_list.len(), 4);
+                let options = (pair_list.get(0), pair_list.get(1), pair_list.get(3));
+                let indexWritesSexp = pair_list.get(2).unwrap();
+                let indexWrites = if let Sexp::List(ref indexVars) = indexWritesSexp {
+                    indexVars
+                        .iter()
+                        .map(|x| {
+                            if let Sexp::String(ref x) = x {
+                                x.clone()
+                            } else {
+                                panic!("Expected symbol")
+                            }
+                        })
+                        .collect()
+                } else {
+                    panic!("Index writes is not a list!");
+                };
+                if let (Some(Sexp::String(lhs)), Some(rhs), Some(Sexp::String(nextFp))) = options {
                     ss.push(EggAssign {
                         lhs: lhs.clone(),
-                        rhs: Some(rhs.to_string()),
-                    });
-                } else if let (Some(Sexp::String(lhs)), None) = option_pair {
-                    ss.push(EggAssign {
-                        lhs: lhs.clone(),
-                        rhs: None,
+                        rhs: rhs.to_string(),
+                        indexWrites,
+                        nextFp: nextFp.clone(),
                     });
                 } else {
                     panic!("Invalid assignment pair: {:?}", pair_list);
@@ -635,21 +702,11 @@ pub fn start_optimize(assignments: Sexp) -> String {
 
     let mut res = vec![];
     for assignment in start(ss) {
-        if let Some(right) = assignment.rhs {
-            let right = parse_str(&right).unwrap();
-            res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
-        }
+        let right = parse_str(&assignment.rhs).unwrap();
+        res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
     }
 
     Sexp::List(res).to_string()
-
-    // match Command::parse() {
-    //     Command::Optimize(params) => {
-    //         let opt = TacOptimizer::new(params);
-    //         opt.run()
-
-    //     }
-    // }
 }
 
 #[cfg(test)]
