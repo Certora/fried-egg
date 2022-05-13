@@ -26,9 +26,7 @@ fn main() {
                         );
                     }
                     "optimize" => {
-                        let mut iter = list.into_iter();
-                        iter.next();
-                        println!("{}", start_optimize(iter.next().unwrap()));
+                        println!("{}", list[1].to_string());
                     }
                     "exit" => break 'outer,
                     _ => panic!("unknown command {}", atom),
