@@ -26,7 +26,7 @@ fn main() {
                         );
                     }
                     "optimize" => {
-                        println!("{}", list[1].to_string());
+                        println!("{}", start_optimize(list[1]));
                     }
                     "exit" => break 'outer,
                     _ => panic!("unknown command {}", atom),

@@ -54,21 +54,132 @@ impl Default for OptParams {
     }
 }
 
+type BlockId = Symbol;
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct EggBlock {
+    pub id: BlockId,
+    pub assignments: Vec<EggAssign>,
+}
+
+impl EggBlock {
+    pub fn from_sexp(expr: &Sexp) -> EggBlock {
+        match expr {
+            Sexp::List(contents) => {
+                match &contents[..] {
+                    [Sexp::String(id), Sexp::List(assignments)] => {
+                        EggBlock {
+                            id: id.into(),
+                            assignments: assignments.into_iter().map(|pair| {
+                                EggAssign::from_sexp(pair)
+                            }).collect()
+                        }
+                    }
+                    _ => panic!("Expected a block, got: {}", expr),
+                }
+            }
+            _ => panic!("Expected an id and expressions for a block, got: {}", expr),
+        }
+    }
+
+    pub fn to_sexp(&self) -> Sexp {
+        Sexp::List(vec![
+            Sexp::String(self.id.to_string()),
+            Sexp::List(self.assignments.iter().map(|assign| assign.to_sexp()).collect()),
+        ])
+    }
+
+    pub fn rename_variables(&self, name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>, original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>) -> EggBlock {
+        let mut new_assignments = Vec::new();
+        for assign in self.assignments.iter() {
+            new_assignments.push(assign.rename_variables(self.id, name_to_original, original_to_name));
+        }
+
+        EggBlock {
+            id: self.id,
+            assignments: new_assignments,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct EggAssign {
-    pub lhs: String,
-    pub rhs: String,
-    pub indexWrites: Vec<String>,
-    pub nextFp: String,
+    pub lhs: Symbol,
+    pub rhs: RecExpr<EVM>,
 }
 
 impl EggAssign {
     pub fn new(lhs: &str, rhs: &str) -> Self {
         Self {
-            lhs: lhs.to_string(),
-            rhs: rhs.to_string(),
-            indexWrites: vec![],
-            nextFp: "noNextFp".to_string(),
+            lhs: lhs.into(),
+            rhs: rhs.parse().unwrap(),
+        }
+    }
+
+    pub fn from_sexp(expr: &Sexp) -> EggAssign{
+        if let Sexp::List(inner) = expr {
+            if inner.len() != 2 {
+                panic!("Expected assignment to have length 2, got: {:?}", inner);
+            }
+            if let Sexp::String(lhs) = &inner[0] {
+                EggAssign::new(lhs, &inner[1].to_string())
+            } else {
+                panic!("Expected variable on lhs, got: {}", inner[0]);
+            }
+        } else {
+            panic!("Expected an assignment, got: {}", expr);
+        }
+    }
+
+    pub fn to_sexp(&self) -> Sexp {
+        Sexp::List(vec![
+            Sexp::String(self.lhs.to_string()),
+            Sexp::String(self.rhs.to_string()),
+        ])
+    }
+
+    pub fn rename_variables(&self, block: BlockId, name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>, original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>) -> EggAssign {
+        let new_lhs = format!("var_{}", original_to_name.len()).into();
+        original_to_name.insert((self.lhs, block), new_lhs);
+        name_to_original.insert(new_lhs, (block, self.lhs));
+
+        let mut new_rhs: RecExpr<EVM> = Default::default();
+        for node in self.rhs.as_ref() {
+            if let EVM::Var(var) = node {
+                if let Some(existing) = original_to_name.get(&(block, *var)) {
+                    new_rhs.add(EVM::Var(existing.clone()));
+                } else {
+                    let new_var = format!("var_{}", name_to_original.len());
+                    original_to_name.insert((block, *var), new_var.clone().into());
+                    name_to_original.insert(new_var.clone().into(), (block, *var));
+                    new_rhs.add(EVM::Var(new_var.clone().into()));
+                }
+            } else {
+                new_rhs.add(node.clone());
+            }
+        }
+
+        EggAssign {
+            lhs: new_lhs.into(),
+            rhs: new_rhs,
+        }
+    }
+
+    pub fn rename_back(self, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> EggAssign {
+        let old_lhs = name_to_original.get(&self.lhs).unwrap().1;
+        let mut old_rhs: RecExpr<EVM> = Default::default();
+        for node in self.rhs.as_ref() {
+            if let EVM::Var(var) = node {
+                let old_var = name_to_original.get(&var).unwrap().1;
+                old_rhs.add(EVM::Var(old_var.clone()));
+            } else {
+                old_rhs.add(node.clone());
+            }
+        }
+
+        EggAssign {
+            lhs: old_lhs.clone(),
+            rhs: old_rhs,
         }
     }
 }
@@ -396,192 +507,48 @@ fn _ids(egraph: &EGraph) -> Vec<egg::Id> {
 pub struct TacOptimizer {}
 
 impl TacOptimizer {
-    fn find_variables(&self, egraph: &EGraph, id: Id) -> Vec<EVM> {
-        // todo
-        return vec![];
-    }
 
-    fn find_nonzero_constants(&self, egraph: &EGraph, id: Id) -> Vec<EVM> {
-        if let Some(c) = &egraph[id].data.constant {
-            if c.0 != "0".parse().unwrap() {
-                return vec![EVM::Num(WrappedU256 { value: c.0 })];
-            }
-        }
-        return vec![];
-    }
-
-    fn find_nonzero_nonone_constants(&self, egraph: &EGraph, id: Id) -> Vec<EVM> {
-        if let Some(c) = &egraph[id].data.constant {
-            if c.0 != "0".parse().unwrap() && c.0 != "1".parse().unwrap() {
-                return vec![EVM::Num(WrappedU256 { value: c.0 })];
-            }
-        }
-        return vec![];
-    }
-
-    fn pattern_substitute(
-        &self,
-        pattern: &Pattern<EVM>,
-        subst: &HashMap<Var, RecExpr<EVM>>,
-    ) -> RecExpr<EVM> {
-        let mut new_egraph = egg::EGraph::<EVM, ()>::new(());
-
-        let mut new_subst = Subst::default();
-        for (var, expr) in subst {
-            let new_id = new_egraph.add_expr(&expr);
-            new_subst.insert(*var, new_id);
-        }
-
-        let root = new_egraph.add_instantiation(&pattern.ast, &new_subst);
-        let get_first_enode = |id| new_egraph[id].nodes[0].clone();
-        get_first_enode(root).build_recexpr(get_first_enode)
-    }
-
-    // Attempts to find as many linear equations as possible, and may return some non-linear ones as well
-    fn find_linear_equations(
-        &self,
-        egraph: &EGraph,
-        id: Id,
-        current_variable: EVM,
-    ) -> Vec<RecExpr<EVM>> {
-        // Non-zero constant variables
-        let const_variables: HashSet<Var> = HashSet::from_iter(
-            vec!["?c", "?m", "?n"]
-                .into_iter()
-                .map(|v| v.parse().unwrap()),
-        );
-        // non-zero, non-one constants
-        let nonone_const_variables: HashSet<Var> = HashSet::from_iter(
-            vec!["?c1", "?m1", "?n1"]
-                .into_iter()
-                .map(|v| v.parse().unwrap()),
-        );
-        // variables
-        let variable_variables: HashSet<Var> = HashSet::from_iter(
-            vec!["?x", "?y", "?z"]
-                .into_iter()
-                .map(|v| v.parse().unwrap()),
-        );
-
-        let searchers: Vec<Pattern<EVM>> = vec![
-            "0",                                // zero
-            "?c",                               // non-zero constants
-            "?x",                               // variables
-            "(+ ?x ?y)",                        // two variables
-            "(+ ?c ?y)",                        // constant and variable
-            "(+ (* ?c1 ?x) ?c)",                // constant and variable multiple
-            "(+ (* ?c1 ?x) ?y)",                // two variables
-            "(+ (* ?c1 ?x) (* ?m1 ?y))",        // two variables with multipliers
-            "(+ ?x (+ ?y ?z))",                 // three variables
-            "(+ ?c (+ ?y ?z))",                 // one constant, two variables
-            "(+ (* ?c1 ?x) (+ ?x ?y))",         // three variables
-            "(+ (* ?c1 ?x) (+ ?y ?c))",         // two vars, one constant
-            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) ?z))", // three variables
-            "(+ (* ?c1 ?x) (+ (* ?m1 ?y) ?c))", // two variables, one constant
-                                                //"(+ (* ?c1 ?x) (+ (* ?m1 ?y) (* ?n1 ?z)))", // three variables
-        ]
-        .into_iter()
-        .map(|s| s.parse().unwrap())
-        .collect();
-
-        let mut results = vec![];
-        for searcher in searchers {
-            if let Some(matches) = searcher.search_eclass(egraph, id) {
-                for subst in matches.substs {
-                    let mut possibilities: Vec<Vec<EVM>> = vec![];
-                    let mut vars_seen: HashSet<EVM> = Default::default();
-                    vars_seen.insert(current_variable.clone());
-                    for var in &searcher.vars() {
-                        let class = subst.get(*var).unwrap();
-                        let mut nodes = vec![];
-                        let in_const = const_variables.contains(var);
-                        let in_var = variable_variables.contains(var);
-                        let in_nonone_const = nonone_const_variables.contains(var);
-                        if in_const {
-                            nodes.extend(self.find_nonzero_constants(egraph, *class));
-                        }
-                        if in_nonone_const {
-                            nodes.extend(self.find_nonzero_nonone_constants(egraph, *class));
-                        }
-                        if in_var {
-                            let vars: Vec<EVM> = self.find_variables(egraph, *class);
-                            for v in vars.into_iter() {
-                                if !vars_seen.contains(&v) {
-                                    nodes.push(v.clone());
-                                }
-                                vars_seen.insert(v);
-                            }
-                        }
-                        possibilities.push(nodes);
-                    }
-
-                    for product in possibilities
-                        .into_iter()
-                        .map(|v| v.into_iter())
-                        .multi_cartesian_product()
-                    {
-                        let mut subst: HashMap<Var, RecExpr<EVM>> = HashMap::new();
-                        for (i, var) in searcher.vars().iter().enumerate() {
-                            subst.insert(*var, product[i].build_recexpr(|_id| unreachable!()));
-                        }
-
-                        results.push(self.pattern_substitute(&searcher, &subst));
-                    }
-                }
-            }
-        }
-
-        results
-    }
-
-    pub fn run(self, params: OptParams, block_assgns: Vec<EggAssign>) -> Vec<EggAssign> {
+    pub fn run(self, params: OptParams, blocks: Vec<EggBlock>) -> Vec<EggBlock> {
         let analysis = TacAnalysis {
             age_map: Default::default(),
         };
         let mut egraph = EGraph::new(analysis).with_explanations_enabled();
-        for (index, assign) in block_assgns.iter().enumerate() {
-            egraph
-                .analysis
-                .age_map
-                .insert(egg::Symbol::from(assign.lhs.clone()), index + 1);
-        }
+        let mut original_to_name = Default::default();
+        let mut name_to_original = Default::default();
+        let renamed_blocks: Vec<EggBlock> = blocks.iter().map(|block| {
+            block.rename_variables(&mut name_to_original, &mut original_to_name)
+        }).collect();
 
-        let mut variable_roots: HashMap<Symbol, Id> = Default::default();
-        // add lhs and rhs of each assignment to a new egraph
-        // and union their eclasses
-        for assign in &block_assgns {
-            let rhs = assign.rhs.clone();
-            assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
-            let rhs_parsed: RecExpr<EVM> = rhs.parse().unwrap();
-            let mut rhs_pattern: PatternAst<EVM> = Default::default();
-            let mut subst = Subst::default();
-            let mut subst_size = 0;
-            for node in rhs_parsed.as_ref() {
-                if let EVM::Var(name) = node {
-                    // add unbound variables to the egraph
-                    if variable_roots.get(name).is_none() {
-                        variable_roots.insert(*name, egraph.add(node.clone()));
+
+        let variable_roots: HashMap<Symbol, Id> = Default::default();
+        for block in renamed_blocks {
+            for assign in block.assignments {
+                let mut rhs_pattern: PatternAst<EVM> = Default::default();
+                let mut subst = Subst::default();
+                let mut subst_size = 0;
+                for node in assign.rhs.as_ref() {
+                    if let EVM::Var(name) = node {
+                        // add unbound variables to the egraph
+                        if variable_roots.get(name).is_none() {
+                            variable_roots.insert(*name, egraph.add(node.clone()));
+                        }
+                        let var = ("?".to_string() + &format!("{}", subst_size))
+                            .parse()
+                            .unwrap();
+                        subst.insert(var, *variable_roots.get(name).unwrap());
+                        subst_size += 1;
+                        rhs_pattern.add(ENodeOrVar::Var(var));
+                    } else {
+                        rhs_pattern.add(ENodeOrVar::ENode(node.clone()));
                     }
-                    let var = ("?".to_string() + &format!("{}", subst_size))
-                        .parse()
-                        .unwrap();
-                    subst.insert(var, *variable_roots.get(name).unwrap());
-                    subst_size += 1;
-                    rhs_pattern.add(ENodeOrVar::Var(var));
-                } else {
-                    rhs_pattern.add(ENodeOrVar::ENode(node.clone()));
                 }
+
+                let id = egraph.add_instantiation(&rhs_pattern, &subst);
+                variable_roots.insert(assign.lhs, id);
             }
-
-            let id = egraph.add_instantiation(&rhs_pattern, &subst);
-            variable_roots.insert(assign.lhs.parse().unwrap(), id);
         }
+
         log::info!("Done adding terms to the egraph.");
-
-        // put all the byte queries in
-        for assign in &block_assgns {
-            is_byte_array_length_computation(&variable_roots, &mut egraph, &assign);
-        }
 
         // run eqsat with the domain rules
         let mut runner: Runner<EVM, TacAnalysis> = Runner::new(egraph.analysis.clone())
@@ -592,121 +559,71 @@ impl TacOptimizer {
         runner = runner.run(&logical_rules());
         log::info!("Done running rules.");
 
-        let mut keep_same = vec![];
-        for assign in &block_assgns {
-            keep_same.push(is_byte_array_length_computation(&variable_roots, &mut runner.egraph, assign))
-        }
-
-        let mut res = vec![];
+        let mut final_blocks = vec![];
         let extract_linear = Extractor::new(&runner.egraph, LinearCostFn {});
         let extract_ordinary = Extractor::new(&runner.egraph, GeneralCostFn {});
         //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
-        for (assign, keep_this_same) in block_assgns.iter().zip(keep_same.iter()) {
-            let current_var: Symbol = assign.lhs.parse().unwrap();
-            let id = variable_roots.get(&current_var).unwrap();
-            
-            let best_r = if *keep_this_same {
-                assign.rhs.clone()
-            } else {
-                let (cost1, best1) = extract_linear.find_best(*id);
-                let (cost2, best2) = extract_ordinary.find_best(*id);
+
+        for block in blocks {
+            let mut new_assignments = vec![];
+
+            for assignment in block.assignments {
+                let new_lhs = original_to_name.get(&(block.id, assignment.lhs)).unwrap();
+                let rhs_id = variable_roots.get(&new_lhs).unwrap();
+                let (cost1, best1) = extract_linear.find_best(*rhs_id);
+                let (cost2, best2) = extract_ordinary.find_best(*rhs_id);
                 let factor: BigUint = "4".parse().unwrap();
-                if cost1 < cost2 * factor {
-                    best1.to_string()
-                } else {
-                    best2.to_string()
-                }
-            };
-            let assg = EggAssign::new(&current_var.to_string(), &best_r.to_string());
-            res.push(assg);
+
+                let new_assignment = EggAssign {
+                    lhs: *new_lhs,
+                    rhs: if cost1 < cost2 * factor {
+                        best1
+                    } else {
+                        best2
+                    },
+                };
+                new_assignments.push(new_assignment.rename_back(&name_to_original));
+            }
+
+
+            final_blocks.push(EggBlock {
+                id: block.id,
+                assignments: new_assignments,
+            });
         }
-        res
+        final_blocks
     }
-}
-
-fn is_byte_array_length_computation(variable_roots: &HashMap<Symbol, Id>, egraph: &mut EGraph, assignment: &EggAssign) -> bool {
-    assignment.indexWrites.iter().any(|write| {
-        let lhs_id = variable_roots.get(&assignment.lhs.parse().unwrap());
-        let nextfp_id = variable_roots.get(&assignment.nextFp.parse().unwrap());
-        let write_id = variable_roots.get(&write.parse().unwrap());
-        if lhs_id == None || nextfp_id == None || write_id == None {
-            return false;
-        }
-        let mut left_subst = Subst::default();
-        left_subst.insert("lhs".parse().unwrap(), *lhs_id.unwrap());
-        let mut right_subst = Subst::default();
-        right_subst.insert("nextFp".parse().unwrap(), *nextfp_id.unwrap());
-        right_subst.insert("write".parse().unwrap(), *write_id.unwrap());
-
-        let left = egraph.add_instantiation(&"(+ ?lhs 32)".parse().unwrap(), &left_subst);
-        let right = egraph.add_instantiation(&"(- ?nextFp ?write)".parse().unwrap(), &right_subst);
-
-        left == right
-    })
-}
-
-fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
-    let mut seen = HashSet::new();
-    for assign in ss.iter() {
-        if seen.contains(&assign.lhs) {
-            panic!("Duplicate assignment: {:?}", assign);
-        }
-        seen.insert(assign.lhs.clone());
-    }
-
-    let params: OptParams = OptParams::default();
-    TacOptimizer {}.run(params, ss)
 }
 
 // Entry point
-pub fn start_optimize(assignments: Sexp) -> String {
-    let mut ss: Vec<EggAssign> = vec![];
+pub fn start_optimize(blocks_in: Sexp) -> String {
+    let mut blocks: Vec<EggBlock> = vec![];
 
-    if let Sexp::List(ref list) = assignments {
-        for pair in list {
-            if let Sexp::List(ref pair_list) = pair {
-                assert_eq!(pair_list.len(), 4);
-                let options = (pair_list.get(0), pair_list.get(1), pair_list.get(3));
-                let indexWritesSexp = pair_list.get(2).unwrap();
-                let indexWrites = if let Sexp::List(ref indexVars) = indexWritesSexp {
-                    indexVars
-                        .iter()
-                        .map(|x| {
-                            if let Sexp::String(ref x) = x {
-                                x.clone()
-                            } else {
-                                panic!("Expected symbol")
-                            }
-                        })
-                        .collect()
-                } else {
-                    panic!("Index writes is not a list!");
-                };
-                if let (Some(Sexp::String(lhs)), Some(rhs), Some(Sexp::String(nextFp))) = options {
-                    ss.push(EggAssign {
-                        lhs: lhs.clone(),
-                        rhs: rhs.to_string(),
-                        indexWrites,
-                        nextFp: nextFp.clone(),
-                    });
-                } else {
-                    panic!("Invalid assignment pair: {:?}", pair_list);
-                }
-            } else {
-                panic!("Expected a list of pairs!");
-            }
+    if let Sexp::List(list) = blocks_in {
+        for block in list.into_iter() {
+            blocks.push(EggBlock::from_sexp(&block));
         }
-    } else {
-        panic!("Expected a list of assignments!");
     }
 
-    let mut res = vec![];
-    for assignment in start(ss) {
-        let right = parse_str(&assignment.rhs).unwrap();
-        res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
+    for block in blocks.iter() {
+        let mut seen = HashSet::new();
+        for assign in block.assignments.iter() {
+            if seen.contains(&assign.lhs) {
+                panic!("Duplicate assignment: {:?}", assign);
+            }
+            seen.insert(assign.lhs.clone());
+        }
     }
 
-    Sexp::List(res).to_string()
+    let params: OptParams = OptParams::default();
+    let new_blocks = TacOptimizer {}.run(params, blocks);
+
+    let mut blocks_list = vec![];
+    for block in new_blocks {
+        blocks_list.push(block.to_sexp());
+    }
+
+    Sexp::List(blocks_list).to_string()
 }
 
 #[cfg(test)]
