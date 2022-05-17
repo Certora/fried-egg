@@ -65,19 +65,16 @@ pub struct EggBlock {
 impl EggBlock {
     pub fn from_sexp(expr: &Sexp) -> EggBlock {
         match expr {
-            Sexp::List(contents) => {
-                match &contents[..] {
-                    [Sexp::String(id), Sexp::List(assignments)] => {
-                        EggBlock {
-                            id: id.into(),
-                            assignments: assignments.into_iter().map(|pair| {
-                                EggAssign::from_sexp(pair)
-                            }).collect()
-                        }
-                    }
-                    _ => panic!("Expected a block, got: {}", expr),
-                }
-            }
+            Sexp::List(contents) => match &contents[..] {
+                [Sexp::String(id), Sexp::List(assignments)] => EggBlock {
+                    id: id.into(),
+                    assignments: assignments
+                        .into_iter()
+                        .map(|pair| EggAssign::from_sexp(pair))
+                        .collect(),
+                },
+                _ => panic!("Expected a block, got: {}", expr),
+            },
             _ => panic!("Expected an id and expressions for a block, got: {}", expr),
         }
     }
@@ -85,14 +82,27 @@ impl EggBlock {
     pub fn to_sexp(&self) -> Sexp {
         Sexp::List(vec![
             Sexp::String(self.id.to_string()),
-            Sexp::List(self.assignments.iter().map(|assign| assign.to_sexp()).collect()),
+            Sexp::List(
+                self.assignments
+                    .iter()
+                    .map(|assign| assign.to_sexp())
+                    .collect(),
+            ),
         ])
     }
 
-    pub fn rename_variables(&self, name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>, original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>) -> EggBlock {
+    pub fn rename_variables(
+        &self,
+        name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
+        original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
+    ) -> EggBlock {
         let mut new_assignments = Vec::new();
         for assign in self.assignments.iter() {
-            new_assignments.push(assign.rename_variables(self.id, name_to_original, original_to_name));
+            new_assignments.push(assign.rename_variables(
+                self.id,
+                name_to_original,
+                original_to_name,
+            ));
         }
 
         EggBlock {
@@ -116,7 +126,7 @@ impl EggAssign {
         }
     }
 
-    pub fn from_sexp(expr: &Sexp) -> EggAssign{
+    pub fn from_sexp(expr: &Sexp) -> EggAssign {
         if let Sexp::List(inner) = expr {
             if inner.len() != 2 {
                 panic!("Expected assignment to have length 2, got: {:?}", inner);
@@ -138,9 +148,14 @@ impl EggAssign {
         ])
     }
 
-    pub fn rename_variables(&self, block: BlockId, name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>, original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>) -> EggAssign {
+    pub fn rename_variables(
+        &self,
+        block: BlockId,
+        name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
+        original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
+    ) -> EggAssign {
         let new_lhs = format!("var_{}", original_to_name.len()).into();
-        original_to_name.insert((self.lhs, block), new_lhs);
+        original_to_name.insert((block, self.lhs), new_lhs);
         name_to_original.insert(new_lhs, (block, self.lhs));
 
         let mut new_rhs: RecExpr<EVM> = Default::default();
@@ -199,18 +214,19 @@ impl egg::CostFunction<EVM> for GeneralCostFn {
         let num_value = "2".parse().unwrap();
         let complex_cost = "20".parse().unwrap();
         match enode {
-            EVM::Num(n) => if n.value < "1000".parse().unwrap() {
-                "1".parse().unwrap()
-            } else  {
-                num_value
-            },
+            EVM::Num(n) => {
+                if n.value < "1000".parse().unwrap() {
+                    "1".parse().unwrap()
+                } else {
+                    num_value
+                }
+            }
             EVM::Var(_) => var_value,
             EVM::Div(_) => enode.fold(complex_cost, |sum, i| sum + costs(i)),
             EVM::Exp(_) => enode.fold(complex_cost, |sum, i| sum + costs(i)),
             _ => enode.fold(basic_cost, |sum, i| sum + costs(i)),
         }
     }
-
 }
 
 // Extract linear expressions by looking for sums of multiplication of variables and constants
@@ -226,11 +242,13 @@ impl egg::CostFunction<EVM> for LinearCostFn {
         let var_value = "5".parse().unwrap();
         let num_value = "2".parse().unwrap();
         match enode {
-            EVM::Num(n) => if n.value < "1000".parse().unwrap() {
-                "1".parse().unwrap()
-            } else  {
-                num_value
-            },
+            EVM::Num(n) => {
+                if n.value < "1000".parse().unwrap() {
+                    "1".parse().unwrap()
+                } else {
+                    num_value
+                }
+            }
             EVM::Var(_) => var_value,
             EVM::Mul([child1, child2]) => {
                 let (mut costa, mut costb) = (costs(*child1), costs(*child2));
@@ -459,12 +477,8 @@ impl Analysis<EVM> for TacAnalysis {
         if let Some((c, lhs, subst)) = egraph[id].data.constant.clone() {
             let mut const_pattern = PatternAst::default();
             const_pattern.add(ENodeOrVar::ENode(EVM::new(c)));
-            let (id, _added) = egraph.union_instantiations(
-                &lhs,
-                &const_pattern,
-                &subst,
-                "constant_folding",
-            );
+            let (id, _added) =
+                egraph.union_instantiations(&lhs, &const_pattern, &subst, "constant_folding");
 
             assert!(
                 !egraph[id].nodes.is_empty(),
@@ -507,7 +521,6 @@ fn _ids(egraph: &EGraph) -> Vec<egg::Id> {
 pub struct TacOptimizer {}
 
 impl TacOptimizer {
-
     pub fn run(self, params: OptParams, blocks: Vec<EggBlock>) -> Vec<EggBlock> {
         let analysis = TacAnalysis {
             age_map: Default::default(),
@@ -515,12 +528,12 @@ impl TacOptimizer {
         let mut egraph = EGraph::new(analysis).with_explanations_enabled();
         let mut original_to_name = Default::default();
         let mut name_to_original = Default::default();
-        let renamed_blocks: Vec<EggBlock> = blocks.iter().map(|block| {
-            block.rename_variables(&mut name_to_original, &mut original_to_name)
-        }).collect();
+        let renamed_blocks: Vec<EggBlock> = blocks
+            .iter()
+            .map(|block| block.rename_variables(&mut name_to_original, &mut original_to_name))
+            .collect();
 
-
-        let variable_roots: HashMap<Symbol, Id> = Default::default();
+        let mut variable_roots: HashMap<Symbol, Id> = Default::default();
         for block in renamed_blocks {
             for assign in block.assignments {
                 let mut rhs_pattern: PatternAst<EVM> = Default::default();
@@ -576,15 +589,10 @@ impl TacOptimizer {
 
                 let new_assignment = EggAssign {
                     lhs: *new_lhs,
-                    rhs: if cost1 < cost2 * factor {
-                        best1
-                    } else {
-                        best2
-                    },
+                    rhs: if cost1 < cost2 * factor { best1 } else { best2 },
                 };
                 new_assignments.push(new_assignment.rename_back(&name_to_original));
             }
-
 
             final_blocks.push(EggBlock {
                 id: block.id,
@@ -593,6 +601,21 @@ impl TacOptimizer {
         }
         final_blocks
     }
+}
+
+fn start_blocks(blocks: Vec<EggBlock>) -> Vec<EggBlock> {
+    for block in blocks.iter() {
+        let mut seen = HashSet::new();
+        for assign in block.assignments.iter() {
+            if seen.contains(&assign.lhs) {
+                panic!("Duplicate assignment: {:?}", assign);
+            }
+            seen.insert(assign.lhs.clone());
+        }
+    }
+
+    let params: OptParams = OptParams::default();
+    TacOptimizer {}.run(params, blocks)
 }
 
 // Entry point
@@ -605,23 +628,10 @@ pub fn start_optimize(blocks_in: Sexp) -> String {
         }
     }
 
-    for block in blocks.iter() {
-        let mut seen = HashSet::new();
-        for assign in block.assignments.iter() {
-            if seen.contains(&assign.lhs) {
-                panic!("Duplicate assignment: {:?}", assign);
-            }
-            seen.insert(assign.lhs.clone());
-        }
-    }
-
-    let params: OptParams = OptParams::default();
-    let new_blocks = TacOptimizer {}.run(params, blocks);
-
-    let mut blocks_list = vec![];
-    for block in new_blocks {
-        blocks_list.push(block.to_sexp());
-    }
+    let blocks_list = start_blocks(blocks)
+        .iter()
+        .map(|block| block.to_sexp())
+        .collect();
 
     Sexp::List(blocks_list).to_string()
 }
@@ -634,10 +644,16 @@ mod tests {
     use rust_evm::{eval_evm, WrappedU256, EVM};
 
     fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
-        let actual = start(input);
-        println!("{:#?}", actual);
-        let actualSet: HashSet<EggAssign> = HashSet::from_iter(actual.into_iter());
-        let expectedSet: HashSet<EggAssign> = HashSet::from_iter(expected.into_iter());
+        let mut actual_blocks = start_blocks(vec![EggBlock {
+            id: "whatever".into(),
+            assignments: input,
+        }]);
+        assert_eq!(actual_blocks.len(), 1);
+        let actual = actual_blocks.pop().unwrap().assignments;
+        let actualSet: HashSet<String> =
+            HashSet::from_iter(actual.into_iter().map(|expr| expr.to_sexp().to_string()));
+        let expectedSet: HashSet<String> =
+            HashSet::from_iter(expected.into_iter().map(|expr| expr.to_sexp().to_string()));
 
         assert!(expectedSet.is_subset(&actualSet));
     }
