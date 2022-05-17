@@ -66,12 +66,17 @@ impl EggBlock {
     pub fn from_sexp(expr: &Sexp) -> EggBlock {
         match expr {
             Sexp::List(contents) => match &contents[..] {
-                [Sexp::String(id), Sexp::List(assignments)] => EggBlock {
-                    id: id.into(),
-                    assignments: assignments
-                        .into_iter()
-                        .map(|pair| EggAssign::from_sexp(pair))
-                        .collect(),
+                [Sexp::String(block_string), Sexp::String(id), Sexp::List(assignments)] => {
+                    if block_string != "block" {
+                        panic!("Expected keyword block, got {}", block_string);
+                    }
+                    EggBlock {
+                        id: id.into(),
+                        assignments: assignments
+                            .into_iter()
+                            .map(|pair| EggAssign::from_sexp(pair))
+                            .collect(),
+                    }
                 },
                 _ => panic!("Expected a block, got: {}", expr),
             },
@@ -81,6 +86,7 @@ impl EggBlock {
 
     pub fn to_sexp(&self) -> Sexp {
         Sexp::List(vec![
+            Sexp::String("block".to_string()),
             Sexp::String(self.id.to_string()),
             Sexp::List(
                 self.assignments
@@ -144,7 +150,7 @@ impl EggAssign {
     pub fn to_sexp(&self) -> Sexp {
         Sexp::List(vec![
             Sexp::String(self.lhs.to_string()),
-            Sexp::String(self.rhs.to_string()),
+            parse_str(&self.rhs.to_string()).unwrap(),
         ])
     }
 
@@ -489,7 +495,8 @@ impl Analysis<EVM> for TacAnalysis {
     }
 }
 
-// some standard axioms
+// some standard axioms, not used anymore in favor of ruler
+/*
 pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
     let mut uni_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
         rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
@@ -511,7 +518,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
 
     uni_dirs.append(&mut bi_dirs);
     uni_dirs
-}
+}*/
 
 // Get the eclass ids for all eclasses in an egraph
 fn _ids(egraph: &EGraph) -> Vec<egg::Id> {
@@ -534,8 +541,8 @@ impl TacOptimizer {
             .collect();
 
         let mut variable_roots: HashMap<Symbol, Id> = Default::default();
-        for block in renamed_blocks {
-            for assign in block.assignments {
+        for block in renamed_blocks.iter() {
+            for assign in block.assignments.iter() {
                 let mut rhs_pattern: PatternAst<EVM> = Default::default();
                 let mut subst = Subst::default();
                 let mut subst_size = 0;
@@ -577,18 +584,17 @@ impl TacOptimizer {
         let extract_ordinary = Extractor::new(&runner.egraph, GeneralCostFn {});
         //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
 
-        for block in blocks {
+        for block in renamed_blocks {
             let mut new_assignments = vec![];
 
             for assignment in block.assignments {
-                let new_lhs = original_to_name.get(&(block.id, assignment.lhs)).unwrap();
-                let rhs_id = variable_roots.get(&new_lhs).unwrap();
+                let rhs_id = variable_roots.get(&assignment.lhs).unwrap();
                 let (cost1, best1) = extract_linear.find_best(*rhs_id);
                 let (cost2, best2) = extract_ordinary.find_best(*rhs_id);
                 let factor: BigUint = "4".parse().unwrap();
 
                 let new_assignment = EggAssign {
-                    lhs: *new_lhs,
+                    lhs: assignment.lhs,
                     rhs: if cost1 < cost2 * factor { best1 } else { best2 },
                 };
                 new_assignments.push(new_assignment.rename_back(&name_to_original));
@@ -604,16 +610,6 @@ impl TacOptimizer {
 }
 
 fn start_blocks(blocks: Vec<EggBlock>) -> Vec<EggBlock> {
-    for block in blocks.iter() {
-        let mut seen = HashSet::new();
-        for assign in block.assignments.iter() {
-            if seen.contains(&assign.lhs) {
-                panic!("Duplicate assignment: {:?}", assign);
-            }
-            seen.insert(assign.lhs.clone());
-        }
-    }
-
     let params: OptParams = OptParams::default();
     TacOptimizer {}.run(params, blocks)
 }
