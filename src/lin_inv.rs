@@ -160,10 +160,6 @@ impl EggAssign {
         name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
         original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
     ) -> EggAssign {
-        let new_lhs = format!("var_{}", original_to_name.len()).into();
-        original_to_name.insert((block, self.lhs), new_lhs);
-        name_to_original.insert(new_lhs, (block, self.lhs));
-
         let mut new_rhs: RecExpr<EVM> = Default::default();
         for node in self.rhs.as_ref() {
             if let EVM::Var(var) = node {
@@ -179,6 +175,10 @@ impl EggAssign {
                 new_rhs.add(node.clone());
             }
         }
+
+        let new_lhs = format!("var_{}", name_to_original.len()).into();
+        original_to_name.insert((block, self.lhs), new_lhs);
+        name_to_original.insert(new_lhs, (block, self.lhs));
 
         EggAssign {
             lhs: new_lhs.into(),
@@ -539,7 +539,7 @@ impl TacOptimizer {
             .iter()
             .map(|block| block.rename_variables(&mut name_to_original, &mut original_to_name))
             .collect();
-
+        
         let mut variable_roots: HashMap<Symbol, Id> = Default::default();
         for block in renamed_blocks.iter() {
             for assign in block.assignments.iter() {
@@ -746,6 +746,37 @@ mod tests {
         let v1 = EVM::from(U256::from(32));
         let v2 = EVM::new(U256::from_dec_str("32").unwrap());
         assert_eq!(v1, v2);
+    }
+
+    #[test]
+    fn full_program1() {
+        let program_sexp = "((block block1 (
+            (a 2)
+            (b a)
+            (a (+ a 4))
+            (a (* a 3))
+        ))
+            (block block2 (
+                (b a)
+                (b (* 2 (+ b 1)))
+                (b (* 2 b))
+            ))
+        )";
+        let expected = "((block block1 (
+                (a 2)
+                (b 2)
+                (a 6)
+                (a 18)
+            ))
+            (block block2 (
+                (b a)
+                (b (+ 2 (* 2 a)))
+                (b (+ 4 (* 4 a)))
+            ))
+        )";
+        let result = start_optimize(parse_str(program_sexp).unwrap());
+        println!("{}", result);
+        assert_eq!(parse_str(&result).unwrap(), parse_str(expected).unwrap());
     }
 }
 
