@@ -1,10 +1,10 @@
 # State of the fried-egg project
 
-Any questions? Oliver's internship is over but is happy to answer questions (oflatt@gmail.com).
+Any questions? Oliver's internship is over but he is happy to answer questions (oflatt@gmail.com).
 
 Fried egg is an egraph-based simplifier for TAC programs. It takes as input a program represented as a series of blocks with assignments to variables in them (see tests in `lin_inv.rs`). It outputs this same format, but tries to simplify each variable's right hand side value.
 
-It works by first inserting the program into the egraph, then running math axioms on the egraph, then extracting the program back out. In an egraph, intermediate variables are bad, so we try to avoid them by keeping a side table of which variables correspond to which eclasses in the egraph.
+Fried egg works by first inserting the program into the egraph, running math axioms on the egraph, then extracting the program back out. In an egraph, intermediate variables are bad (they make it hard to extract things back out), so we try to avoid them by keeping a side table of which variables correspond to eclasses in the egraph.
 
 Initially, each block uses completely independent variables. However, if we learn that a variable is the same for all parents of a block, then we can use it in the child block. See `full_program_2` in `lin_inv.rs` for an example.
 
