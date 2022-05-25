@@ -14,6 +14,7 @@ use std::iter::FromIterator;
 use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
+use indexmap::IndexSet;
 
 use crate::logical_equality::logical_rules;
 
@@ -176,7 +177,7 @@ impl EggAssign {
                 if let Some(existing) = original_to_name.get(&(block, *var)) {
                     new_rhs.add(EVM::Var(existing.clone()));
                 } else {
-                    let new_var = format!("var_{}", name_to_original.len());
+                    let new_var = format!("rust_{}", name_to_original.len());
                     original_to_name.insert((block, *var), new_var.clone().into());
                     name_to_original.insert(new_var.clone().into(), (block, *var));
                     new_rhs.add(EVM::Var(new_var.clone().into()));
@@ -186,7 +187,7 @@ impl EggAssign {
             }
         }
 
-        let new_lhs = format!("var_{}", name_to_original.len()).into();
+        let new_lhs = format!("rust_{}", name_to_original.len()).into();
         original_to_name.insert((block, self.lhs), new_lhs);
         name_to_original.insert(new_lhs, (block, self.lhs));
 
@@ -289,6 +290,7 @@ impl egg::CostFunction<EVM> for LinearCostFn {
 pub struct Data {
     constant: Option<(U256, PatternAst<EVM>, Subst)>,
     type_to_best_linear: BestForType,
+    type_to_best_general: BestForType,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -364,17 +366,178 @@ impl LinearTerm {
     }
 }
 
-type BestForType = HashMap<Symbol, (EVM, BigUint)>;
+
+// A map from type to a tuple (enode, cost, type of chidlren)
+// The type of the children is used to extract back out the best program
+type BestForType = HashMap<Symbol, (EVM, BigUint, Symbol)>;
 
 #[derive(Debug, Clone)]
 pub struct LinearAnalysis {
 }
 
 #[derive(Debug, Clone)]
+pub struct GeneralAnalysis {
+}
+
+#[derive(Debug, Clone)]
 pub struct TacAnalysis {
     pub linear_analysis: LinearAnalysis,
+    pub general_analysis: GeneralAnalysis,
     pub typemap: HashMap<Symbol, Symbol>,
     pub name_to_original: HashMap<Symbol, (BlockId, Symbol)>,
+}
+
+impl GeneralAnalysis {
+    pub fn my_build_recexpr<F>(class: Id, target_type: Symbol, mut get_node: F) -> RecExpr<EVM>
+    where
+        F: FnMut(Id, Symbol) -> (EVM, Symbol),
+    {
+        let (node, newtype) = get_node(class, target_type);
+        let mut set = IndexSet::<EVM>::default();
+        let mut ids = HashMap::<Id, Id>::default();
+        let mut todo: Vec<(Id, Symbol)> = node.children().iter().map(|id| (*id, newtype)).collect();
+
+        while let Some((id, this_type)) = todo.last().copied() {
+            if ids.contains_key(&id) {
+                todo.pop();
+                continue;
+            }
+
+            let (node, child_type) = get_node(id, this_type);
+
+            // check to see if we can do this node yet
+            let mut ids_has_all_children = true;
+            for child in node.children() {
+                if !ids.contains_key(child) {
+                    ids_has_all_children = false;
+                    todo.push((*child, child_type));
+                }
+            }
+
+            // all children are processed, so we can lookup this node safely
+            if ids_has_all_children {
+                let node = node.map_children(|id| ids[&id]);
+                let new_id = set.insert_full(node).0;
+                ids.insert(id, Id::from(new_id));
+                todo.pop();
+            }
+        }
+
+        // finally, add the root node and create the expression
+        let mut nodes: Vec<EVM> = set.into_iter().collect();
+        nodes.push(node.clone().map_children(|id| ids[&id]));
+        RecExpr::from(nodes)
+    }
+
+
+    pub fn get_best_from_eclass(egraph: &egg::EGraph<EVM, TacAnalysis>, eclass: Id, target_type: Symbol) -> Option<(RecExpr<EVM>, BigUint)> {
+        if !egraph[eclass].data.type_to_best_general.contains_key(&target_type) {
+            return None
+        }
+
+        let get_enode = |id, this_type| (egraph[id].data.type_to_best_general[&this_type].0.clone(), egraph[id].data.type_to_best_general[&this_type].2);
+        return Some((
+            Self::my_build_recexpr(eclass, target_type, get_enode),
+            egraph[eclass].data.type_to_best_general[&target_type].1.clone()
+        ));
+    }
+
+    pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> BestForType {
+        let mut best: BestForType = HashMap::new();
+
+        let cost_sum = |child_type: Symbol| -> Option<BigUint> {
+            let mut sum = "0".parse().unwrap();
+            let mut success = true;
+            enode.for_each(|child| {
+                if let Some((_, cost, _)) = egraph[child].data.type_to_best_general.get(&child_type) {
+                    sum += cost.clone();
+                } else {
+                    success = false;
+                }
+            });
+            if success {
+                Some(sum)
+            } else {
+                None
+            }
+        };
+
+        let basic_cost: BigUint = "5".parse().unwrap();
+        let var_value = "5".parse().unwrap();
+        let num_value = "2".parse().unwrap();
+        let complex_cost = "20".parse().unwrap();
+        let bvtype = "bv256".into();
+        let booltype = "bool".into();
+
+        let mut type_to_type = |childtype, outputtype, cost| {
+            if let Some(child_val) = cost_sum(childtype) {
+                let new_cost = child_val + cost;
+                if let Some((_, existing, _)) = best.get(&outputtype) {
+                    if existing < &new_cost {
+                        return;
+                    }
+                }
+                best.insert(outputtype, (enode.clone(), new_cost, childtype));
+            }
+        };
+
+
+        match enode {
+            EVM::Num(n) => {
+                let cost: BigUint = if n.value < "1000".parse().unwrap() {
+                    "1".parse().unwrap()
+                } else {
+                    num_value
+                };
+                // when there are no children, the type part doesn't matter
+                best.insert("bv256".into(), (enode.clone(), cost.clone(), "nochildren".into()));
+                if n.value <= "1".parse().unwrap() {
+                    best.insert("bool".into(), (enode.clone(), cost, "nochildren".into()));
+                }
+            }
+
+            EVM::Var(v) => {
+                if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
+                    best.insert(*var_type, (enode.clone(), var_value, "nochildren".into()));
+                } else {
+                    panic!("Variable {} has no type in typemap", v);
+                }
+            }
+
+            EVM::Mul(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::Add(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::Sub(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::Div(_) => type_to_type(bvtype, bvtype, complex_cost),
+            EVM::BWAnd(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::BWOr(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::ShiftLeft(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::ShiftRight(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::LOr(_) => type_to_type(booltype, booltype, basic_cost),
+            EVM::LAnd(_) => type_to_type(booltype, booltype, basic_cost),
+
+            EVM::Gt(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Ge(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Lt(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Le(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Eq(_) => {
+                type_to_type(bvtype, booltype, basic_cost.clone());
+                type_to_type(booltype, booltype, basic_cost);
+            }
+            EVM::Slt(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Sle(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Sgt(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Sge(_) => type_to_type(bvtype, booltype, basic_cost),
+
+            EVM::LNot(_) => type_to_type(booltype, booltype, basic_cost),
+            EVM::BWNot(_) => type_to_type(bvtype, bvtype, basic_cost),
+
+            EVM::Exp(_) => type_to_type(bvtype, bvtype, complex_cost),
+
+            EVM::Apply(_) => ()
+        }
+
+        best
+    }
 }
 
 impl LinearAnalysis {
@@ -383,13 +546,16 @@ impl LinearAnalysis {
             return None
         }
 
-        let get_enode = |id| egraph[id].data.type_to_best_linear[&target_type].0.clone();
-        return Some((get_enode(eclass).build_recexpr(get_enode), egraph[eclass].data.type_to_best_linear[&target_type].1.clone()));
+        let get_enode = |id, this_type| (egraph[id].data.type_to_best_linear[&this_type].0.clone(), egraph[id].data.type_to_best_linear[&this_type].2);
+        return Some((
+            GeneralAnalysis::my_build_recexpr(eclass, target_type, get_enode),
+            egraph[eclass].data.type_to_best_linear[&target_type].1.clone()
+        ));
     }
 
 
     pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> BestForType {
-        let mut best = HashMap::new();
+        let mut best: BestForType = HashMap::new();
         let add_value: BigUint = "40".parse().unwrap();
         let mul_value = "20".parse().unwrap();
         let var_value = "5".parse().unwrap();
@@ -399,7 +565,7 @@ impl LinearAnalysis {
             let mut sum = "0".parse().unwrap();
             let mut success = true;
             enode.for_each(|child| {
-                if let Some((_, cost)) = egraph[child].data.type_to_best_linear.get(&child_type) {
+                if let Some((_, cost, _)) = egraph[child].data.type_to_best_linear.get(&child_type) {
                     sum += cost.clone();
                 } else {
                     success = false;
@@ -420,28 +586,28 @@ impl LinearAnalysis {
                 } else {
                     num_value
                 };
-                best.insert("bit256".into(), (enode.clone(), cost));
+                best.insert("bv256".into(), (enode.clone(), cost, "nochildren".into()));
             }
 
             EVM::Var(v) => {
                 if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
-                    best.insert(*var_type, (enode.clone(), var_value));
+                    best.insert(*var_type, (enode.clone(), var_value, "nochildren".into()));
                 } else {
                     panic!("Variable {} has no type in typemap", v);
                 }
             }
 
             EVM::Mul([child1, child2]) => {
-                if let (Some((_, costafound)), Some((_, costbfound))) = (
-                    egraph[*child1].data.type_to_best_linear.get(&"bit256".into()),
-                    egraph[*child2].data.type_to_best_linear.get(&"bit256".into())) {
+                if let (Some((_, costafound, _)), Some((_, costbfound, _))) = (
+                    egraph[*child1].data.type_to_best_linear.get(&"bv256".into()),
+                    egraph[*child2].data.type_to_best_linear.get(&"bv256".into())) {
                     let mut costa = costafound.clone();
                     let mut costb = costbfound.clone();
                     if costb < costa {
                         std::mem::swap(&mut costa, &mut costb);
                     }
                     let mycost = if costa < var_value && costb < mul_value {
-                        best.insert("bit256".into(), (enode.clone(), costa + costb + mul_value));
+                        best.insert("bv256".into(), (enode.clone(), costa + costb + mul_value, "bv256".into()));
                     } else {
                     };
                     
@@ -449,19 +615,40 @@ impl LinearAnalysis {
             }
 
             EVM::Add([child1, child2]) => {
-                if let Some(child_val) = cost_sum("bit256".into()) {
-                    best.insert("bit256".into(), (enode.clone(), add_value + child_val));
+                if let Some(child_val) = cost_sum("bv256".into()) {
+                    best.insert("bv256".into(), (enode.clone(), add_value + child_val, "bv256".into()));
                 }
             }
             EVM::Sub([child1, child2]) => {
-                if let Some(child_val) = cost_sum("bit256".into()) {
-                    best.insert("bit256".into(), (enode.clone(), add_value + child_val));
+                if let Some(child_val) = cost_sum("bv256".into()) {
+                    best.insert("bv256".into(), (enode.clone(), add_value + child_val, "bv256".into()));
                 }
             }
             _ => {}
         }
 
         best
+    }
+}
+
+impl TacAnalysis {
+    pub fn merge_best_for_type(to: &mut BestForType, from: &BestForType) -> bool {
+        let mut merge_a = false;
+        for (key, (enode, cost, child_type)) in from {
+            if let Some((enode2, cost2, child_type2)) = to.get_mut(key) {
+                if cost < cost2 {
+                    *enode2 = enode.clone();
+                    *cost2 = cost.clone();
+                    *child_type2 = child_type.clone();
+                    merge_a = true;
+                }
+            } else {
+                to.insert(key.clone(), (enode.clone(), cost.clone(), child_type.clone()));
+                merge_a = true;
+            }
+        }
+
+        merge_a
     }
 }
 
@@ -497,6 +684,7 @@ impl Analysis<EVM> for TacAnalysis {
         Data {
             constant,
             type_to_best_linear: egraph.analysis.linear_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original),
+            type_to_best_general: egraph.analysis.general_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original),
         }
     }
 
@@ -512,18 +700,9 @@ impl Analysis<EVM> for TacAnalysis {
             (Some(a), Some(b)) => assert_eq!(a.0, b.0),
         }
 
-        let mut old_type_to_best_linear = Default::default();
-        std::mem::swap(&mut old_type_to_best_linear, &mut to.type_to_best_linear);
-        for (key, (enode1, best1)) in old_type_to_best_linear {
-            if let Some((enode2, best2)) = from.type_to_best_linear.get(&key) {
-                if best2 < &best1 {
-                    to.type_to_best_linear.insert(key.clone(), (enode2.clone(), best2.clone()));
-                    merge_a = true;
-                }
-            } else {
-                merge_a = true;
-            }
-        }
+        merge_a |= TacAnalysis::merge_best_for_type(&mut to.type_to_best_linear, &from.type_to_best_linear);
+        merge_a |= TacAnalysis::merge_best_for_type(&mut to.type_to_best_general, &from.type_to_best_general);
+
 
         DidMerge(merge_a, true)
     }
@@ -589,6 +768,7 @@ impl TacOptimizer {
 
         let analysis = TacAnalysis {
             linear_analysis: LinearAnalysis {},
+            general_analysis: GeneralAnalysis {},
             typemap,
             name_to_original: name_to_original.clone(),
         };
@@ -643,17 +823,25 @@ impl TacOptimizer {
 
             for assignment in block.assignments {
                 let rhs_id = variable_roots.get(&assignment.lhs).unwrap();
-                let mut current_best = assignment.rhs.clone();
+                
                 let target_type = *runner.egraph.analysis.typemap.get(&name_to_original[&assignment.lhs].1).unwrap();
-                if let Some((best1, cost1)) = LinearAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
-                    current_best = best1;
-                }
 
-                let new_assignment = EggAssign {
-                    lhs: assignment.lhs,
-                    rhs: current_best,
-                };
-                new_assignments.push(new_assignment.rename_back(&name_to_original));
+                let linear_preferred_factor: BigUint = "10".parse().unwrap();
+                if let Some((mut current_best, current_best_cost)) = GeneralAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
+                    if let Some((best2, cost2)) = LinearAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
+                        if cost2 < current_best_cost*linear_preferred_factor {
+                            current_best = best2;
+                        }
+                    }
+
+                    let new_assignment = EggAssign {
+                        lhs: assignment.lhs,
+                        rhs: current_best,
+                    };
+                    new_assignments.push(new_assignment.rename_back(&name_to_original));
+                } else {
+                    panic!("Could not find original expression using GeneralAnalysis for {} with type {}", assignment.rhs, target_type);
+                }
             }
 
             final_blocks.push(EggBlock {
