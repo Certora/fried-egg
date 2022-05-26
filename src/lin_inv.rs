@@ -1044,4 +1044,35 @@ mod tests {
         let types = "((unbound bool) (unbound2 bv256) (number1 bv256) (bool1 bool) (bool2 bool) (bool3 bool))";
         check_test(program_sexp, expected, types);
     }
+
+    #[test]
+    fn full_program2() {
+        let program_sexp = "(
+            (block block1 () (
+                (a (+ 1 2))
+            ))
+            (block block2 () (
+                (b 10)
+                (a (- b 7))
+            ))
+            (block block3 (block1 block2) (
+                (z (* a 2))
+            ))
+        )";
+        let expected = "(
+            (block block1 () (
+                (a 3)
+            ))
+            (block block2 () (
+                (b 10)
+                (a 3)
+            ))
+            (block block3 (block1 block2) (
+                (z 6)
+            ))
+        )";
+        let types = "((a bv256) (b bv256) (z bv256))";
+        // We haven't implemented inference of equality across blocks yet
+        //check_test(program_sexp, expected, types);
+    }
 }

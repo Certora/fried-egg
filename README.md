@@ -19,17 +19,29 @@ When we get the program back on the kotlin side, we then re-infer what these typ
 
 ## To-dos
 
-- UNSOUNDNESS! Right now we just throw away intermediate variables that we don't support (because of types). Imagine we have:
+- When converting back on the kotlin side, full expressions need to be converted back to three-address form. I wrote `toCommands` in `TACExpr.kt` to do this, but it doesn't take into account sharing. If two separate expressions share some subpart, it makes two variables even though they are the same. Example:
+
 ```
-a = 2 + 3
-a = a + weird_pointer_computation_or_something_that_we_don't_support
-a = a + 1
+a = (b + c) * d
+x = (b + c) * (b + c)
+
+Is translated to:
+temp1 = b + c
+a = temp1 + d
+temp2 = b + c
+temp3 = b + c
+x = temp2 * temp3
+
+When it could be:
+temp1 = b + c
+a = temp1 + d
+x = temp1 * temp1
 ```
-Then I just throw out the middle a and compute a = 2 + 3 + 1 which is wrong because I threw out that line of code
 
 - We currently use `logical_equality` for small math simplifications, but we should really just send a small program with one expression in it to `lin_inv` instead and delete that file.
+- We are missing boolean axioms like `(&& a 1) => a` because we don't distinguish between bools and bv256. We should generate boolean axioms using Ruler and then use them on boolean expressions (we can tell if something is a boolean by checking the operator or looking up the variable).
 - Errors from the Rust process tend to disappear in CI, and I'm not sure if they show up from staging. Where are they going? See `RustBlaster.kt` for where we call `redirectError`, which redirects the stderr out to the current process.
-- It would be cool to do partial evaluation / automatic inlining in the egraph when we simplify things.
+- It would be cool to do partial evaluation / automatic inlining in the egraph when we simplify things. Though I'm not sure if it's worth the runtime cost.
 Imagine we have a program:
 ```
 Block1: x = 0
@@ -38,7 +50,7 @@ Block2: x = 2 * pi
 
 Block3, with parents (Block1 and Block2): y = sin(x)
 ```
-If we try inlining block1 and block2, we find that in both cases y = 0. But we will never find that the x in block1 is equal to the x in block2.
+If we try inlining block1 and block2, we find that in both cases y = 0. But we will never find that the x in block1 is equal to the x in block2. (This is just an example, we don't actually support sin or real numbers.)
 
 
 
