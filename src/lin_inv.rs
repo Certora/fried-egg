@@ -216,9 +216,9 @@ impl EggAssign {
     }
 }
 
-pub struct LinearCostFn {}
+/*pub struct LinearCostFn {}*/
 
-pub struct GeneralCostFn {}
+/*pub struct GeneralCostFn {}
 
 impl egg::CostFunction<EVM> for GeneralCostFn {
     type Cost = BigUint;
@@ -244,10 +244,10 @@ impl egg::CostFunction<EVM> for GeneralCostFn {
             _ => enode.fold(basic_cost, |sum, i| sum + costs(i)),
         }
     }
-}
+}*/
 
 // Extract linear expressions by looking for sums of multiplication of variables and constants
-impl egg::CostFunction<EVM> for LinearCostFn {
+/*impl egg::CostFunction<EVM> for LinearCostFn {
     type Cost = BigUint;
     fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
     where
@@ -284,7 +284,7 @@ impl egg::CostFunction<EVM> for LinearCostFn {
             _ => enode.fold(upper_value, |sum, i| sum + costs(i)),
         }
     }
-}
+}*/
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
