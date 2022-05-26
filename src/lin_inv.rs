@@ -824,7 +824,9 @@ impl TacOptimizer {
             for assignment in block.assignments {
                 let rhs_id = variable_roots.get(&assignment.lhs).unwrap();
                 
-                let target_type = *runner.egraph.analysis.typemap.get(&name_to_original[&assignment.lhs].1).unwrap();
+                let target_type = *runner.egraph.analysis.typemap.get(&name_to_original[&assignment.lhs].1).unwrap_or_else(|| {
+                    panic!("no type for {}", name_to_original[&assignment.lhs].1);
+                });
 
                 let linear_preferred_factor: BigUint = "10".parse().unwrap();
                 if let Some((mut current_best, current_best_cost)) = GeneralAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
@@ -906,93 +908,66 @@ mod tests {
     use primitive_types::U256;
     use rust_evm::{eval_evm, WrappedU256, EVM};
 
-    fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
-        let mut actual_blocks = start_blocks(vec![EggBlock {
-            id: "whatever".into(),
-            predecessors: vec![],
-            assignments: input,
-        }]);
-        assert_eq!(actual_blocks.len(), 1);
-        let actual = actual_blocks.pop().unwrap().assignments;
-        let actualSet: HashSet<String> =
-            HashSet::from_iter(actual.into_iter().map(|expr| expr.to_sexp().to_string()));
-        let expectedSet: HashSet<String> =
-            HashSet::from_iter(expected.into_iter().map(|expr| expr.to_sexp().to_string()));
-
-        assert!(expectedSet.is_subset(&actualSet));
+    fn check_test(input: &str, expected: &str, types: &str) {
+        let result = start_optimize(&parse_str(input).unwrap(), &parse_str(types).unwrap());
+        assert_eq!(parse_str(&result).unwrap().to_string(), parse_str(expected).unwrap().to_string());
     }
 
     #[test]
     fn test1() {
-        let input = vec![
-            EggAssign::new("R194", "64"),
-            EggAssign::new("R198", "(+ 32 R194)"),
-            EggAssign::new("R202", "(- R198 R194)"),
-        ];
-        let expected = vec![
-            EggAssign::new("R194", "64"),
-            EggAssign::new("R198", "96"),
-            EggAssign::new("R202", "32"),
-        ];
-        check_test(input, expected);
+        let program_sexp = "(
+            (block block1 () (
+                (R194 64)
+                (R198 (+ 32 R194))
+                (R202 (- R198 R194))
+            ))
+            )";
+        let expected = "(
+            (block block1 () (
+                (R194 64)
+                (R198 96)
+                (R202 32)
+            ))
+        )";
+        let types = "((R194 bv256) (R198 bv256) (R202 bv256))";
+        check_test(program_sexp, expected, types);
     }
 
     #[test]
     fn test2() {
-        let input = vec![
-            EggAssign::new("x1", "(+ x2 96)"),
-            EggAssign::new("x3", "(- x1 32)"),
-            EggAssign::new("x4", "(- x3 x2)"),
-        ];
-        let expected = vec![
-            EggAssign::new("x1", "(+ x2 96)"),
-            EggAssign::new("x3", "(+ x2 64)"),
-            EggAssign::new("x4", "64"),
-        ];
-        check_test(input, expected);
+        let program_sexp = "(
+            (block block1 () (
+                (x1 (+ x2 96))
+                (x3 (- x1 32))
+                (x4 (- x3 x2))
+            ))
+        )";
+        let expected = "(
+            (block block1 () (
+                (x1 (+ x2 96))
+                (x3 (+ x2 64))
+                (x4 64)
+            ))
+        )";
+        let types = "((x1 bv256) (x2 bv256) (x3 bv256) (x4 bv256))";
+        check_test(program_sexp, expected, types);
     }
 
-    #[test]
-    fn test4() {
-        let input = vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2", "(+ 32 R1)"),
-        ];
-        let expected = vec![EggAssign::new("R1", "64"), EggAssign::new("R2", "96")];
-        check_test(input, expected);
-    }
-
-    #[test]
-    fn test5() {
-        let input = vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2", "(- 32 R1)"),
-        ];
-        let expected =
-            vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2",
-                "115792089237316195423570985008687907853269984665640564039457584007913129639904"),
-        ];
-        check_test(input, expected);
-    }
-
-    #[test]
-    fn test6() {
-        let input = vec![
-            EggAssign::new("R1", "64"),
-            EggAssign::new("R2", "(- R1 32)"),
-        ];
-        let expected = vec![EggAssign::new("R1", "64"), EggAssign::new("R2", "32")];
-        check_test(input, expected);
-    }
-
-    #[test]
-    fn test7() {
-        let input = vec![EggAssign::new("R1", "(- 5 0)")];
-
-        let expected = vec![EggAssign::new("R1", "5")];
-        check_test(input, expected);
+    fn test3() {
+        let program_sexp = "(
+            (block block1 () (
+                (R1 64)
+                (R2 (- R1 32))
+            ))
+        )";
+        let expected = "(
+            (block block1 () (
+                (R1 64)
+                (R2 32)
+            ))
+        )";
+        let types = "((R1 bv256) (R2 bv256))";
+        check_test(program_sexp, expected, types);
     }
 
     #[test]
@@ -1040,12 +1015,33 @@ mod tests {
             ))
             (block block2 () (
                 (b a)
-                (b (+ 2 (* 2 a)))
-                (b (+ 4 (* 4 a)))
+                (b (+ (* 2 a) 2))
+                (b (+ (* 4 a) 4))
             ))
         )";
-        let result = start_optimize(parse_str(program_sexp).unwrap());
-        println!("{}", result);
-        assert_eq!(parse_str(&result).unwrap(), parse_str(expected).unwrap());
+        let types = "((a bv256) (b bv256))";
+        check_test(program_sexp, expected, types);
+    }
+
+    #[test]
+    fn mixed_boolean() {
+        let program_sexp = "(
+            (block block1 () (
+                (bool1 unbound)
+                (number1 (* 3 3))
+                (bool2 (< unbound2 number1))
+                (bool3 (|| bool2 bool1))
+            ))
+        )";
+        let expected = "(
+            (block block1 () (
+                (bool1 unbound)
+                (number1 9)
+                (bool2 (< unbound2 9))
+                (bool3 (|| (< unbound2 9) unbound))
+            ))
+        )";
+        let types = "((unbound bool) (unbound2 bv256) (number1 bv256) (bool1 bool) (bool2 bool) (bool3 bool))";
+        check_test(program_sexp, expected, types);
     }
 }
