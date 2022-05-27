@@ -19,6 +19,7 @@ When we get the program back on the kotlin side, we then re-infer what these typ
 
 ## To-dos
 
+- The regression tests in CI do not pass, there must be some sort of terrible unsoundness bug.
 - When converting back on the kotlin side, full expressions need to be converted back to three-address form. I wrote `toCommands` in `TACExpr.kt` to do this, but it doesn't take into account sharing. If two separate expressions share some subpart, it makes two variables even though they are the same. Example:
 
 ```
