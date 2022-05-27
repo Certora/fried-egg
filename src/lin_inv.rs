@@ -828,7 +828,7 @@ impl TacOptimizer {
                     panic!("no type for {}", name_to_original[&assignment.lhs].1);
                 });
 
-                let linear_preferred_factor: BigUint = "10".parse().unwrap();
+                let linear_preferred_factor: BigUint = "0".parse().unwrap();
                 if let Some((mut current_best, current_best_cost)) = GeneralAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
                     if let Some((best2, cost2)) = LinearAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
                         if cost2 < current_best_cost*linear_preferred_factor {
