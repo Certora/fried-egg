@@ -58,6 +58,7 @@ impl Default for OptParams {
 type BlockId = Symbol;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
+// Rust representation of a program block
 pub struct EggBlock {
     pub id: BlockId,
     pub predecessors: Vec<BlockId>,
@@ -107,6 +108,7 @@ impl EggBlock {
         ])
     }
 
+    // Rename all the variables to unique names to avoid clashing with other blocks
     pub fn rename_variables(
         &self,
         name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
@@ -216,158 +218,17 @@ impl EggAssign {
     }
 }
 
-/*pub struct LinearCostFn {}*/
-
-/*pub struct GeneralCostFn {}
-
-impl egg::CostFunction<EVM> for GeneralCostFn {
-    type Cost = BigUint;
-    fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
-    where
-        C: FnMut(Id) -> Self::Cost,
-    {
-        let basic_cost = "5".parse().unwrap();
-        let var_value = "5".parse().unwrap();
-        let num_value = "2".parse().unwrap();
-        let complex_cost = "20".parse().unwrap();
-        match enode {
-            EVM::Num(n) => {
-                if n.value < "1000".parse().unwrap() {
-                    "1".parse().unwrap()
-                } else {
-                    num_value
-                }
-            }
-            EVM::Var(_) => var_value,
-            EVM::Div(_) => enode.fold(complex_cost, |sum, i| sum + costs(i)),
-            EVM::Exp(_) => enode.fold(complex_cost, |sum, i| sum + costs(i)),
-            _ => enode.fold(basic_cost, |sum, i| sum + costs(i)),
-        }
-    }
-}*/
-
-// Extract linear expressions by looking for sums of multiplication of variables and constants
-/*impl egg::CostFunction<EVM> for LinearCostFn {
-    type Cost = BigUint;
-    fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
-    where
-        C: FnMut(Id) -> Self::Cost,
-    {
-        let upper_value = "1000".parse().unwrap();
-        let add_value = "40".parse().unwrap();
-        let mul_value = "20".parse().unwrap();
-        let var_value = "5".parse().unwrap();
-        let num_value = "2".parse().unwrap();
-        match enode {
-            EVM::Num(n) => {
-                if n.value < "1000".parse().unwrap() {
-                    "1".parse().unwrap()
-                } else {
-                    num_value
-                }
-            }
-            EVM::Var(_) => var_value,
-            EVM::Mul([child1, child2]) => {
-                let (mut costa, mut costb) = (costs(*child1), costs(*child2));
-                if costb < costa {
-                    std::mem::swap(&mut costa, &mut costb);
-                }
-
-                if costa < var_value && costb < mul_value {
-                    return costa + costb + mul_value;
-                } else {
-                    return costa + costb + upper_value;
-                }
-            }
-            EVM::Add(_) => enode.fold(add_value, |sum, i| sum + costs(i)),
-            EVM::Sub(_) => enode.fold(add_value, |sum, i| sum + costs(i)),
-            _ => enode.fold(upper_value, |sum, i| sum + costs(i)),
-        }
-    }
-}*/
-
 #[derive(Default, Debug, Clone)]
 pub struct Data {
+    // A constant for this eclass and the pattern for how it was computed
     constant: Option<(U256, PatternAst<EVM>, Subst)>,
+    // The best enodes per type for linear expressions
     type_to_best_linear: BestForType,
+    // The best enode per type with a general cost function
     type_to_best_general: BestForType,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct LinearTerm {
-    number: U256,
-    variables: Vec<(Symbol, U256)>,
-}
-
-impl LinearTerm {
-    pub fn canonicalize(&self) -> LinearTerm {
-        let mut variables = self.variables.clone();
-        variables.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut new_vars: Vec<(Symbol, U256)> = vec![];
-        if variables.len() > 0 {
-            for var in variables.iter() {
-                if var.1 != "0".parse().unwrap() {
-                    if new_vars.len() > 0 && var.0 == new_vars.last().unwrap().0 {
-                        new_vars.last_mut().unwrap().1 = eval_evm(
-                            &EVM::Add([Id::from(0), Id::from(0)]),
-                            Some(new_vars.last().unwrap().1),
-                            Some(var.1),
-                        )
-                        .unwrap();
-                    } else {
-                        new_vars.push(*var);
-                    }
-                }
-            }
-        }
-
-        LinearTerm {
-            number: self.number,
-            variables: new_vars,
-        }
-    }
-
-    pub fn add_canon(&self, other: &LinearTerm) -> LinearTerm {
-        let mut variables = self.variables.clone();
-        variables.extend(other.variables.clone());
-        let number = eval_evm(
-            &EVM::Add([Id::from(0), Id::from(0)]),
-            Some(self.number),
-            Some(other.number),
-        );
-        LinearTerm {
-            number: number.unwrap(),
-            variables,
-        }
-        .canonicalize()
-    }
-
-    pub fn to_expr(&self) -> RecExpr<EVM> {
-        let mut expr = RecExpr::default();
-        if self.number != "0".parse().unwrap() {
-            expr.add(EVM::Num(WrappedU256 { value: self.number }));
-        }
-
-        for variable in &self.variables {
-            let before = expr.as_ref().len();
-            expr.add(EVM::Num(WrappedU256 { value: variable.1 }));
-            let num = expr.as_ref().len() - 1;
-            expr.add(EVM::Var(variable.0));
-            let var = expr.as_ref().len() - 1;
-            expr.add(EVM::Mul([Id::from(num), Id::from(var)]));
-            let mul = expr.as_ref().len() - 1;
-
-            if before != 0 {
-                expr.add(EVM::Add([Id::from(before - 1), Id::from(mul)]));
-            }
-        }
-
-        expr
-    }
-}
-
-
-// A map from type to a tuple (enode, cost, type of chidlren)
+// A map from type to a tuple (enode, cost, type of children)
 // The type of the children is used to extract back out the best program
 type BestForType = HashMap<Symbol, (EVM, BigUint, Symbol)>;
 
@@ -557,7 +418,7 @@ impl LinearAnalysis {
     pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> BestForType {
         let mut best: BestForType = HashMap::new();
         let add_value: BigUint = "40".parse().unwrap();
-        let mul_value = "20".parse().unwrap();
+        let mul_value: BigUint = "20".parse().unwrap();
         let var_value = "5".parse().unwrap();
         let num_value = "2".parse().unwrap();
 
@@ -597,6 +458,7 @@ impl LinearAnalysis {
                 }
             }
 
+            // Only multiplications of a constant and variable are accepted
             EVM::Mul([child1, child2]) => {
                 if let (Some((_, costafound, _)), Some((_, costbfound, _))) = (
                     egraph[*child1].data.type_to_best_linear.get(&"bv256".into()),
@@ -606,20 +468,18 @@ impl LinearAnalysis {
                     if costb < costa {
                         std::mem::swap(&mut costa, &mut costb);
                     }
-                    let mycost = if costa < var_value && costb < mul_value {
+                    if costa < num_value && costb < var_value {
                         best.insert("bv256".into(), (enode.clone(), costa + costb + mul_value, "bv256".into()));
-                    } else {
-                    };
-                    
+                    }
                 }
             }
 
-            EVM::Add([child1, child2]) => {
+            EVM::Add(_) => {
                 if let Some(child_val) = cost_sum("bv256".into()) {
                     best.insert("bv256".into(), (enode.clone(), add_value + child_val, "bv256".into()));
                 }
             }
-            EVM::Sub([child1, child2]) => {
+            EVM::Sub(_) => {
                 if let Some(child_val) = cost_sum("bv256".into()) {
                     best.insert("bv256".into(), (enode.clone(), add_value + child_val, "bv256".into()));
                 }
@@ -725,42 +585,14 @@ impl Analysis<EVM> for TacAnalysis {
     }
 }
 
-// some standard axioms, not used anymore in favor of ruler
-/*
-pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
-    let mut uni_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
-        rewrite!("commute-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
-        rewrite!("commute-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
-        rewrite!("sub-cancel"; "(- ?a ?a)" => "0"),
-        rewrite!("add-neg"; "(+ ?a (- 0 ?a))" => "0"),
-        rewrite!("mul-0"; "(* ?a 0)" => "0"),
-    ];
-
-    let mut bi_dirs: Vec<Rewrite<EVM, TacAnalysis>> = vec![
-        rewrite!("add-0"; "(+ ?a 0)" <=> "?a"),
-        rewrite!("sub-0"; "(- ?a 0)" <=> "?a"),
-        rewrite!("mul-1"; "(* ?a 1)" <=> "?a"),
-        rewrite!("sub-add"; "(- ?a ?b)" <=> "(+ ?a (- 0 ?b))"),
-        rewrite!("add-sub";  "(+ ?a (- 0 ?b))" <=> "(- ?a ?b)"),
-        // rewrite!("assoc-add"; "(+ ?a (+ ?b ?c))" <=> "(+ (+ ?a ?b) ?c)"),
-    ]
-    .concat();
-
-    uni_dirs.append(&mut bi_dirs);
-    uni_dirs
-}*/
-
-// Get the eclass ids for all eclasses in an egraph
-fn _ids(egraph: &EGraph) -> Vec<egg::Id> {
-    egraph.classes().map(|c| c.id).collect()
-}
-
 pub struct TacOptimizer {}
 
 impl TacOptimizer {
     pub fn run(self, params: OptParams, blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggBlock> {
         let mut original_to_name = Default::default();
         let mut name_to_original = Default::default();
+
+        // Rename all the blocks so they are independent
         let renamed_blocks: Vec<EggBlock> = blocks
             .iter()
             .map(|block| block.rename_variables(&mut name_to_original, &mut original_to_name))
@@ -772,8 +604,11 @@ impl TacOptimizer {
             typemap,
             name_to_original: name_to_original.clone(),
         };
+        // Set up the egraph with fresh analysis
         let mut egraph = EGraph::new(analysis).with_explanations_enabled();
         
+
+        // Add all the blocks to the egraph, keeping track of the eclasses for each variable
         let mut variable_roots: HashMap<Symbol, Id> = Default::default();
         for block in renamed_blocks.iter() {
             for assign in block.assignments.iter() {
@@ -813,11 +648,8 @@ impl TacOptimizer {
         runner = runner.run(&logical_rules());
         log::info!("Done running rules.");
 
+        // Extract the optimized blocks back out
         let mut final_blocks = vec![];
-        //let extract_linear = Extractor::new(&runner.egraph, LinearCostFn {});
-        //let extract_ordinary = Extractor::new(&runner.egraph, GeneralCostFn {});
-        //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
-
         for block in renamed_blocks {
             let mut new_assignments = vec![];
 
@@ -828,6 +660,7 @@ impl TacOptimizer {
                     panic!("no type for {}", name_to_original[&assignment.lhs].1);
                 });
 
+                // How much should we prefer extracting a linear thing compared to the general cost function? "0" is not at all
                 let linear_preferred_factor: BigUint = "0".parse().unwrap();
                 if let Some((mut current_best, current_best_cost)) = GeneralAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
                     if let Some((best2, cost2)) = LinearAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
@@ -881,7 +714,7 @@ fn parse_type_map(sexp: &Sexp) -> HashMap<Symbol, Symbol> {
     typemap
 }
 
-// Entry point
+// Entry point- parse Sexp and run optimization
 pub fn start_optimize(blocks_in: &Sexp, typemap_in: &Sexp) -> String {
     let mut blocks: Vec<EggBlock> = vec![];
 
@@ -1072,7 +905,7 @@ mod tests {
             ))
         )";
         let types = "((a bv256) (b bv256) (z bv256))";
-        // We haven't implemented inference of equality across blocks yet
+        // We haven't implemented inference of equality across blocks yet, but when we do this test should pass
         //check_test(program_sexp, expected, types);
     }
 }

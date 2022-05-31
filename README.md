@@ -2,8 +2,7 @@
 
 Any questions? Oliver's internship is over but he is happy to answer questions (oflatt@gmail.com).
 
-Fried egg is an egraph-based simplifier for TAC programs. The kotlin code converts TAC Commands into a block format that the rust code then parses (`MathOptimization.kt`). The program is represented as a series of blocks with assignments to variables in them (see tests in `lin_inv.rs`). It outputs this same format, but tries to simplify each variable's right hand side value. Right now it very experimental, and it's not clear if it will
-actually help simplify the query to Z3 or not.
+Fried egg is an egraph-based simplifier for TAC programs. The kotlin code converts TAC Commands into a block format that the rust code then parses (`MathOptimization.kt`). The program is represented as a series of blocks with assignments to variables in them (see tests in `lin_inv.rs`). It outputs this same format, but tries to simplify each variable's right hand side value. Right now it is very experimental, and it's not clear if it will actually help simplify the query to Z3 or not.
 
 Fried egg works by first inserting the program into the egraph, running math axioms on the egraph, then extracting the program back out (`TacOptimizer::run`). In an egraph, intermediate variables are inconvenient (they make it hard to extract simpler terms back out), so we avoid them by keeping a side table of which variables correspond to eclasses in the egraph.
 
