@@ -32,25 +32,15 @@ pub enum Command {
 #[derive(Serialize, Deserialize, Parser)]
 #[clap(rename_all = "kebab-case")]
 pub struct OptParams {
-    ////////////////
-    // eqsat args //
-    ////////////////
-    #[clap(long, default_value = "5")]
     pub eqsat_iter_limit: usize,
-    #[clap(long, default_value = "10000")]
     pub eqsat_node_limit: usize,
-    ////////////////
-    // block from TAC CFG //
-    ////////////////
-    // #[clap(long, default_value = "input.json")]
-    // pub input: String,
 }
 
 impl Default for OptParams {
     fn default() -> Self {
         Self {
-            eqsat_iter_limit: 5,
-            eqsat_node_limit: 10000,
+            eqsat_iter_limit: 3,
+            eqsat_node_limit: 50000,
         }
     }
 }
@@ -323,10 +313,11 @@ impl GeneralAnalysis {
             }
         };
 
-        let basic_cost: BigUint = "5".parse().unwrap();
+        let good_cost: BigUint = "5".parse().unwrap();
+        let bad_cost: BigUint = "10".parse().unwrap();
+        let very_bad_cost: BigUint = "50".parse().unwrap();
         let var_value = "5".parse().unwrap();
         let num_value = "2".parse().unwrap();
-        let complex_cost = "20".parse().unwrap();
         let bvtype = "bv256".into();
         let booltype = "bool".into();
 
@@ -365,34 +356,34 @@ impl GeneralAnalysis {
                 }
             }
 
-            EVM::Mul(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::Add(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::Sub(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::Div(_) => type_to_type(bvtype, bvtype, complex_cost),
-            EVM::BWAnd(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::BWOr(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::ShiftLeft(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::ShiftRight(_) => type_to_type(bvtype, bvtype, basic_cost),
-            EVM::LOr(_) => type_to_type(booltype, booltype, basic_cost),
-            EVM::LAnd(_) => type_to_type(booltype, booltype, basic_cost),
+            EVM::Mul(_) => type_to_type(bvtype, bvtype, bad_cost),
+            EVM::Add(_) => type_to_type(bvtype, bvtype, good_cost),
+            EVM::Sub(_) => type_to_type(bvtype, bvtype, good_cost),
+            EVM::Div(_) => type_to_type(bvtype, bvtype, very_bad_cost),
+            EVM::BWAnd(_) => type_to_type(bvtype, bvtype, bad_cost),
+            EVM::BWOr(_) => type_to_type(bvtype, bvtype, bad_cost),
+            EVM::ShiftLeft(_) => type_to_type(bvtype, bvtype, bad_cost),
+            EVM::ShiftRight(_) => type_to_type(bvtype, bvtype, bad_cost),
+            EVM::LOr(_) => type_to_type(booltype, booltype, good_cost),
+            EVM::LAnd(_) => type_to_type(booltype, booltype, good_cost),
 
-            EVM::Gt(_) => type_to_type(bvtype, booltype, basic_cost),
-            EVM::Ge(_) => type_to_type(bvtype, booltype, basic_cost),
-            EVM::Lt(_) => type_to_type(bvtype, booltype, basic_cost),
-            EVM::Le(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Gt(_) => type_to_type(bvtype, booltype, good_cost),
+            EVM::Ge(_) => type_to_type(bvtype, booltype, good_cost),
+            EVM::Lt(_) => type_to_type(bvtype, booltype, good_cost),
+            EVM::Le(_) => type_to_type(bvtype, booltype, good_cost),
             EVM::Eq(_) => {
-                type_to_type(bvtype, booltype, basic_cost.clone());
-                type_to_type(booltype, booltype, basic_cost);
+                type_to_type(bvtype, booltype, good_cost.clone());
+                type_to_type(booltype, booltype, good_cost);
             }
-            EVM::Slt(_) => type_to_type(bvtype, booltype, basic_cost),
-            EVM::Sle(_) => type_to_type(bvtype, booltype, basic_cost),
-            EVM::Sgt(_) => type_to_type(bvtype, booltype, basic_cost),
-            EVM::Sge(_) => type_to_type(bvtype, booltype, basic_cost),
+            EVM::Slt(_) => type_to_type(bvtype, booltype, good_cost),
+            EVM::Sle(_) => type_to_type(bvtype, booltype, good_cost),
+            EVM::Sgt(_) => type_to_type(bvtype, booltype, good_cost),
+            EVM::Sge(_) => type_to_type(bvtype, booltype, good_cost),
 
-            EVM::LNot(_) => type_to_type(booltype, booltype, basic_cost),
-            EVM::BWNot(_) => type_to_type(bvtype, bvtype, basic_cost),
+            EVM::LNot(_) => type_to_type(booltype, booltype, good_cost),
+            EVM::BWNot(_) => type_to_type(bvtype, bvtype, bad_cost),
 
-            EVM::Exp(_) => type_to_type(bvtype, bvtype, complex_cost),
+            EVM::Exp(_) => type_to_type(bvtype, bvtype, very_bad_cost),
 
             EVM::Apply(_) => ()
         }
