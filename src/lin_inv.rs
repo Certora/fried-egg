@@ -40,7 +40,7 @@ impl Default for OptParams {
     fn default() -> Self {
         Self {
             eqsat_iter_limit: 3,
-            eqsat_node_limit: 50000,
+            eqsat_node_limit: 100_000,
         }
     }
 }
