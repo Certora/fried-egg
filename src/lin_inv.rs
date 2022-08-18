@@ -352,7 +352,7 @@ impl GeneralAnalysis {
                 if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
                     best.insert(*var_type, (enode.clone(), var_value, "nochildren".into()));
                 } else {
-                    panic!("Variable {} has no type in typemap", v);
+                    panic!("Variable {} has no type in typemap", &name_to_original.get(&v).unwrap().1);
                 }
             }
 
@@ -445,7 +445,7 @@ impl LinearAnalysis {
                 if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
                     best.insert(*var_type, (enode.clone(), var_value, "nochildren".into()));
                 } else {
-                    panic!("Variable {} has no type in typemap", v);
+                    panic!("Variable {} has no type in typemap", &name_to_original.get(&v).unwrap().1);
                 }
             }
 

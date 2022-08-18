@@ -23,25 +23,6 @@ When we get the program back on the kotlin side, we then re-infer what these typ
 - All variables in blocks in the egraph are independent. However, if we learn that a variable is the same regardless of the path to a current block, then we can substitute it
 in the block. See `full_program2` for an example. This could be implemented as an egraph "hook" (see `egg` documentation). The hook would check for every variable, if it can be unioned with its instantiations in parent blocks. You also need to modify the kotlin to send predecessor blocks to rust as the second argument to `block`.
 - The regression tests in CI do not pass, there must be some sort of terrible unsoundness bug.
-- When converting back on the kotlin side, full expressions need to be converted back to three-address form. I wrote `toCommands` in `TACExpr.kt` to do this, but it doesn't take into account sharing. If two separate expressions share some subpart, it makes two variables even though they are the same. Example:
-
-```
-a = (b + c) * d
-x = (b + c) * (b + c)
-
-Is translated to:
-temp1 = b + c
-a = temp1 + d
-temp2 = b + c
-temp3 = b + c
-x = temp2 * temp3
-
-When it could be:
-temp1 = b + c
-a = temp1 + d
-x = temp1 * temp1
-```
-
 - The first thing the rust code does is make all the variables in each block independent.
 This way, each block is processed soundly on it's own.
 - We currently use `logical_equality` for small math simplifications, but we should really just send a small program with one expression in it to `lin_inv` instead and delete that file. This will also allow us to send "assumptions", which are really just commands that come before the final expression. 
