@@ -103,6 +103,7 @@ impl EggBlock {
         &self,
         name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
         original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
+        original_to_names: &mut HashMap<Symbol, Vec<Symbol>>,
     ) -> EggBlock {
         let mut new_assignments = Vec::new();
         for assign in self.assignments.iter() {
@@ -110,6 +111,7 @@ impl EggBlock {
                 self.id,
                 name_to_original,
                 original_to_name,
+                original_to_names,
             ));
         }
 
@@ -162,6 +164,7 @@ impl EggAssign {
         block: BlockId,
         name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
         original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
+        original_to_names: &mut HashMap<Symbol, Vec<Symbol>>,
     ) -> EggAssign {
         let mut new_rhs: RecExpr<EVM> = Default::default();
         for node in self.rhs.as_ref() {
@@ -169,10 +172,15 @@ impl EggAssign {
                 if let Some(existing) = original_to_name.get(&(block, *var)) {
                     new_rhs.add(EVM::Var(existing.clone()));
                 } else {
-                    let new_var = format!("rust_{}", name_to_original.len());
-                    original_to_name.insert((block, *var), new_var.clone().into());
-                    name_to_original.insert(new_var.clone().into(), (block, *var));
-                    new_rhs.add(EVM::Var(new_var.clone().into()));
+                    let new_var = format!("rust_{}", name_to_original.len()).into();
+                    original_to_name.insert((block, *var), new_var);
+                    name_to_original.insert(new_var, (block, *var));
+                    new_rhs.add(EVM::Var(new_var));
+
+                    if original_to_names.get(&var).is_none() {
+                        original_to_names.insert(*var, vec![]);
+                    }
+                    original_to_names.get_mut(&var).unwrap().push(new_var);
                 }
             } else {
                 new_rhs.add(node.clone());
@@ -182,6 +190,11 @@ impl EggAssign {
         let new_lhs = format!("rust_{}", name_to_original.len()).into();
         original_to_name.insert((block, self.lhs), new_lhs);
         name_to_original.insert(new_lhs, (block, self.lhs));
+        
+        if(original_to_names.get(&self.lhs).is_none()) {
+            original_to_names.insert(self.lhs, vec![]);
+        }
+        original_to_names.get_mut(&self.lhs).unwrap().push(new_lhs);
 
         EggAssign {
             lhs: new_lhs.into(),
@@ -236,6 +249,9 @@ pub struct TacAnalysis {
     pub general_analysis: GeneralAnalysis,
     pub typemap: HashMap<Symbol, Symbol>,
     pub name_to_original: HashMap<Symbol, (BlockId, Symbol)>,
+    // A set of variables that are no longer needed because they were renamed intermediates
+    // We proved all the paths are the same for these variables in the DSA
+    pub obsolete_variables: HashSet<Symbol>,
 }
 
 impl GeneralAnalysis {
@@ -293,7 +309,7 @@ impl GeneralAnalysis {
         ));
     }
 
-    pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> BestForType {
+    pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>, obsolete_variables: &HashSet<Symbol>) -> BestForType {
         let mut best: BestForType = HashMap::new();
 
         let cost_sum = |child_type: Symbol| -> Option<BigUint> {
@@ -350,7 +366,12 @@ impl GeneralAnalysis {
 
             EVM::Var(v) => {
                 if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
-                    best.insert(*var_type, (enode.clone(), var_value, "nochildren".into()));
+                    let cost = if (obsolete_variables.contains(v)) {
+                        very_bad_cost
+                    } else {
+                        var_value
+                    };
+                    best.insert(*var_type, (enode.clone(), cost, "nochildren".into()));
                 } else {
                     panic!("Variable {} has no type in typemap", &name_to_original.get(&v).unwrap().1);
                 }
@@ -535,7 +556,7 @@ impl Analysis<EVM> for TacAnalysis {
         Data {
             constant,
             type_to_best_linear: egraph.analysis.linear_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original),
-            type_to_best_general: egraph.analysis.general_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original),
+            type_to_best_general: egraph.analysis.general_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original, &egraph.analysis.obsolete_variables),
         }
     }
 
@@ -580,13 +601,17 @@ pub struct TacOptimizer {}
 
 impl TacOptimizer {
     pub fn run(self, params: OptParams, blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggBlock> {
+        // Find the name of this variable with respect to the current block
         let mut original_to_name = Default::default();
+        // Find the original name of a variable
         let mut name_to_original = Default::default();
+        // Find all the possible names of a variable
+        let mut original_to_names = Default::default();
 
         // Rename all the blocks so they are independent
         let renamed_blocks: Vec<EggBlock> = blocks
             .iter()
-            .map(|block| block.rename_variables(&mut name_to_original, &mut original_to_name))
+            .map(|block| block.rename_variables(&mut name_to_original, &mut original_to_name, &mut original_to_names))
             .collect();
 
         let analysis = TacAnalysis {
@@ -594,6 +619,7 @@ impl TacOptimizer {
             general_analysis: GeneralAnalysis {},
             typemap,
             name_to_original: name_to_original.clone(),
+            obsolete_variables: Default::default(),
         };
         // Set up the egraph with fresh analysis
         let mut egraph = EGraph::new(analysis).with_explanations_enabled();
@@ -601,6 +627,7 @@ impl TacOptimizer {
 
         // Add all the blocks to the egraph, keeping track of the eclasses for each variable
         let mut variable_roots: HashMap<Symbol, Id> = Default::default();
+        let mut unbound_variables: HashSet<Symbol> = Default::default();
         for block in renamed_blocks.iter() {
             for assign in block.assignments.iter() {
                 let mut rhs_pattern: PatternAst<EVM> = Default::default();
@@ -611,6 +638,7 @@ impl TacOptimizer {
                         // add unbound variables to the egraph
                         if variable_roots.get(name).is_none() {
                             variable_roots.insert(*name, egraph.add(node.clone()));
+                            unbound_variables.insert(*name);
                         }
                         let var = ("?".to_string() + &format!("{}", subst_size))
                             .parse()
@@ -631,11 +659,37 @@ impl TacOptimizer {
         log::info!("Done adding terms to the egraph.");
 
         // run eqsat with the domain rules
+        let variable_roots_clone = variable_roots.clone();
         let mut runner: Runner<EVM, TacAnalysis> = Runner::new(egraph.analysis.clone())
             .with_egraph(egraph)
             .with_iter_limit(params.eqsat_iter_limit)
             .with_node_limit(params.eqsat_node_limit)
-            .with_scheduler(egg::SimpleScheduler);
+            .with_scheduler(egg::SimpleScheduler)
+            // When we prove all instances of a variable are the same, get rid of intermediate renamings
+            .with_hook(move |runner| {
+                for (_original, names) in &original_to_names {
+                    let mut unbound: Vec<Symbol> = vec![];
+                    let mut ids: Vec<Id> = names.iter().filter_map(|name|
+                        if unbound_variables.contains(name) {
+                            unbound.push(*name);
+                            None
+                        } else {
+                            Some(runner.egraph.find(*variable_roots_clone.get(name).unwrap()))
+                        }
+                    )
+                        .collect();
+                    ids.dedup();
+
+                    if ids.len() == 1 {
+                        for intermediate in unbound {
+                            runner.egraph.union_trusted(*variable_roots_clone.get(&intermediate).unwrap(), ids[0], "intermediateequal");
+                            runner.egraph.analysis.obsolete_variables.insert(intermediate);
+                        }
+                    }
+                }
+                runner.egraph.rebuild();
+                Ok(())
+            });
         runner = runner.run(&logical_rules());
         log::info!("Done running rules.");
 
@@ -706,6 +760,7 @@ fn parse_type_map(sexp: &Sexp) -> HashMap<Symbol, Symbol> {
 }
 
 // Entry point- parse Sexp and run optimization
+// We expect all the blocks to be DSA
 pub fn start_optimize(blocks_in: &Sexp, typemap_in: &Sexp) -> String {
     let mut blocks: Vec<EggBlock> = vec![];
 

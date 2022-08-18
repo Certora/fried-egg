@@ -7,7 +7,7 @@ authors = [ "Chandrakana Nandi" ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egg = "0.7.1"
+egg = "0.9.0"
 etcommon-bigint = "0.2.10"
 clap = { version = "3.0.7", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -17,7 +17,7 @@ env_logger = { version = "0.7", default-features = false }
 once_cell = "1.8.0"
 primitive-types = { version = "0.10", default-features = false, features = ["rlp"] }
 rand = "0.8.4"
-rust-evm = { git = "ssh://git@github.com/Certora/rust-evm", rev = "dbaf3068cafe8e375b47428fd82489850d0288d9" }
+rust-evm = { git = "ssh://git@github.com/Certora/rust-evm", rev = "c9854d7d07b01923396989a08c13d39b085f9edc" }
 symbolic_expressions = "5.0.3"
 num = "0.3"
 num-bigint = { version = "0.3", features = ["rand"] }
