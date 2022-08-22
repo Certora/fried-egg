@@ -3,8 +3,9 @@ use egg::*;
 use serde::*;
 use std::io;
 use std::io::prelude::*;
+use std::cell::RefCell;
 // use statement::Stmt;
-use egg::{ENodeOrVar, Pattern, RecExpr};
+use egg::{ENodeOrVar, Pattern, RecExpr, Justification};
 use itertools::Itertools;
 use num_bigint::BigUint;
 use primitive_types::U256;
@@ -40,7 +41,7 @@ impl Default for OptParams {
     fn default() -> Self {
         Self {
             eqsat_iter_limit: 3,
-            eqsat_node_limit: 100_000,
+            eqsat_node_limit: 50_000,
         }
     }
 }
@@ -191,13 +192,13 @@ impl EggAssign {
         original_to_name.insert((block, self.lhs), new_lhs);
         name_to_original.insert(new_lhs, (block, self.lhs));
         
-        if(original_to_names.get(&self.lhs).is_none()) {
+        if original_to_names.get(&self.lhs).is_none() {
             original_to_names.insert(self.lhs, vec![]);
         }
         original_to_names.get_mut(&self.lhs).unwrap().push(new_lhs);
 
         EggAssign {
-            lhs: new_lhs.into(),
+            lhs: new_lhs,
             rhs: new_rhs,
         }
     }
@@ -252,6 +253,9 @@ pub struct TacAnalysis {
     // A set of variables that are no longer needed because they were renamed intermediates
     // We proved all the paths are the same for these variables in the DSA
     pub obsolete_variables: HashSet<Symbol>,
+
+    // A set of unions that actually did anything (unioned two eclasses)
+    pub important_unions: RefCell<Vec<(Id, Id)>>
 }
 
 impl GeneralAnalysis {
@@ -366,7 +370,7 @@ impl GeneralAnalysis {
 
             EVM::Var(v) => {
                 if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
-                    let cost = if (obsolete_variables.contains(v)) {
+                    let cost = if obsolete_variables.contains(v) {
                         very_bad_cost
                     } else {
                         var_value
@@ -595,6 +599,10 @@ impl Analysis<EVM> for TacAnalysis {
             );
         }
     }
+
+    fn pre_union(egraph: &EGraph, left: Id, right: Id, _reason: &Option<Justification>) {
+        egraph.analysis.important_unions.borrow_mut().push((left, right))
+    }
 }
 
 pub struct TacOptimizer {}
@@ -620,6 +628,7 @@ impl TacOptimizer {
             typemap,
             name_to_original: name_to_original.clone(),
             obsolete_variables: Default::default(),
+            important_unions: Default::default(),
         };
         // Set up the egraph with fresh analysis
         let mut egraph = EGraph::new(analysis).with_explanations_enabled();
