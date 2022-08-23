@@ -130,6 +130,34 @@ pub struct EggAssign {
     pub rhs: RecExpr<EVM>,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct EggEquality {
+    pub lhs: RecExpr<EVM>,
+    pub rhs: RecExpr<EVM>,
+}
+
+impl EggEquality {
+    fn rename_recexpr(recexpr: &RecExpr<EVM>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> RecExpr<EVM>{
+        let mut old_recexpr: RecExpr<EVM> = Default::default();
+        for node in recexpr.as_ref() {
+            if let EVM::Var(var) = node {
+                let old_var = name_to_original.get(&var).unwrap().1;
+                old_recexpr.add(EVM::Var(old_var.clone()));
+            } else {
+                old_recexpr.add(node.clone());
+            }
+        }
+        old_recexpr
+    }
+
+    pub fn rename_back(self, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> EggEquality {
+        EggEquality {
+            lhs: EggEquality::rename_recexpr(&self.lhs, name_to_original),
+            rhs: EggEquality::rename_recexpr(&self.rhs, name_to_original),,
+        }
+    }
+}
+
 impl EggAssign {
     pub fn new(lhs: &str, rhs: &str) -> Self {
         Self {
@@ -200,24 +228,6 @@ impl EggAssign {
         EggAssign {
             lhs: new_lhs,
             rhs: new_rhs,
-        }
-    }
-
-    pub fn rename_back(self, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> EggAssign {
-        let old_lhs = name_to_original.get(&self.lhs).unwrap().1;
-        let mut old_rhs: RecExpr<EVM> = Default::default();
-        for node in self.rhs.as_ref() {
-            if let EVM::Var(var) = node {
-                let old_var = name_to_original.get(&var).unwrap().1;
-                old_rhs.add(EVM::Var(old_var.clone()));
-            } else {
-                old_rhs.add(node.clone());
-            }
-        }
-
-        EggAssign {
-            lhs: old_lhs.clone(),
-            rhs: old_rhs,
         }
     }
 }
@@ -601,7 +611,9 @@ impl Analysis<EVM> for TacAnalysis {
     }
 
     fn pre_union(egraph: &EGraph, left: Id, right: Id, _reason: &Option<Justification>) {
-        egraph.analysis.important_unions.borrow_mut().push((left, right))
+        if (egraph.find(left) != egraph.find(right)) {
+            egraph.analysis.important_unions.borrow_mut().push((left, right))
+        }
     }
 }
 
@@ -703,6 +715,30 @@ impl TacOptimizer {
         log::info!("Done running rules.");
 
         // Extract the optimized blocks back out
+        let mut final_equalities: Vec<EggEquality> = vec![];
+        let mut equal_vars: HashMap<Id, Vec<Symbol>> = Default::default();
+        for (variable, eclass) in variable_roots {
+            if runner.egraph.analysis.obsolete_variables.contains(&variable) {
+                let old_var = name_to_original.get(&variable).unwrap().1;
+                if let Some(existing) = equal_vars.get_mut(&eclass) {
+                    existing.push(old_var);
+                } else {
+                    equal_vars.insert(eclass, vec![old_var]);
+                }
+            }
+        }
+
+        for (_class, vars) in equal_vars {
+            let expr1 = RecExpr::default();
+            expr1.add(EVM::Var(vars[0]));
+            for var in vars.iter().skip(1) {
+                let expr2 = RecExpr::default();
+                expr2.add(EVM::Var(*var));
+                final_equalities.push(EggEquality { lhs: expr1, rhs: expr2 });
+            }
+        }
+
+
         let mut final_blocks = vec![];
         for block in renamed_blocks {
             let mut new_assignments = vec![];
