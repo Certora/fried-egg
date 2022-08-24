@@ -894,19 +894,7 @@ mod tests {
                 (b (* 2 b))
             ))
         )";
-        let expected = "(
-            (block block1 () (
-                (a 2)
-                (b 2)
-                (a 6)
-                (a 18)
-            ))
-            (block block2 () (
-                (b a)
-                (b (+ (* 2 a) 2))
-                (b (+ (* 4 a) 4))
-            ))
-        )";
+        let expected = "((block block1 () ((a 2) (b 2) (a 6) (a 18))) (block block2 () ((b a) (b (+ 2 (+ a a))) (b (* 4 (+ a 1))))))";
         let types = "((a bv256) (b bv256))";
         check_test(program_sexp, expected, types);
     }
@@ -960,7 +948,16 @@ mod tests {
             ))
         )";
         let types = "((a bv256) (b bv256) (z bv256))";
-        // We haven't implemented inference of equality across blocks yet, but when we do this test should pass
-        //check_test(program_sexp, expected, types);
+        check_test(program_sexp, expected, types);
+    }
+
+    #[test]
+    fn full_program3() {
+        let program_sexp = "((block 0_0_0_0_0_0_0 () ((R1 egg_var_0) (R2 egg_var_1) (R3 egg_var_2) (R4 egg_var_3) (tacCalldatabuf!4 egg_var_4) (tacCalldatabuf!36 egg_var_5) (tacCalldatabuf!68 egg_var_6) (R6 egg_var_7) (B10 (== R4 0)))) (block 82_1023_0_0_2_0_0 (0_0_0_0_0_0_0) ((R11 (& 4294967295 tacCalldatabuf!4)) (R12 (& 4294967295 tacCalldatabuf!36)) (R13 (& 4294967295 tacCalldatabuf!68)) (B15 (! (< 0 R11))))) (block 358_1018_0_0_0_0_0 (82_1023_0_0_2_0_0) ((R18 (+ R11 R13)) (R19 (& 4294967295 R18)) (B20 (> R19 R12)) (B22 B20))) (block 387_1018_0_0_0_0_0 (358_1018_0_0_0_0_0) ((R24 (& 4294967295 0)) (B25 (< R24 R11)))) (block 417_1018_0_0_0_0_0 (387_1018_0_0_0_0_0) ((R26 (+ R13 1)) (R28 (& 4294967295 R26)) (B29 (> R28 R12)) (B31 B29))) (block 447_1018_0_0_0_0_0 (417_1018_0_0_0_0_0) ((B16 1))) (block 448_1018_0_0_0_0_0 (417_1018_0_0_0_0_0) ((R34 (& 4294967295 1)) (B35 (< R34 R11)))) (block 461_1018_0_0_0_0_0 (387_1018_0_0_0_0_0 448_1018_0_0_0_0_0) ((B16 0))) (block 2_0_0_0_0_0_0 (447_1018_0_0_0_0_0 461_1018_0_0_0_0_0 2_0_0_0_0_4_0) ()) (block 2_0_0_0_0_4_0 (0_0_0_0_0_0_0 82_1023_0_0_2_0_0 358_1018_0_0_0_0_0) ((B16 0))))";
+        let expected = program_sexp;
+
+        let types = "((lastHasThrown bool) (lastReverted bool) (R0 bv256) (tacAddress bv256) (B1 bool) (tacM0x40 bv256) (R2 bv256) (tacCalldatasize bv256) (B4 bool) (R11 bv256) (R13 bv256) (tacCalldatabuf!0 bv256) (R15 bv256) (R17 bv256) (B21 bool) (R22 bv256) (tacCallvalue bv256) (B26 bool) (R76 bv256) (R78 bv256) (R37 bv256) (R39 bv256) (tacCalldatabuf!4 bv256) (R41 bv256) (R50 bv256) (R52 bv256) (tacCalldatabuf!36 bv256) (R54 bv256) (R63 bv256) (R65 bv256) (tacCalldatabuf!68 bv256) (R67 bv256) (R90 bv256) (B94 bool) (B98 bool) (B102 bool) (R128 bv256) (R130 bv256) (R105 bv256) (R109 bv256) (R111 bv256) (B114 bool) (B118 bool) (B122 bool) (B126 bool) (R141 bv256) (R143 bv256) (R139 bv256) (R203 bv256) (R146 bv256) (R150 bv256) (B153 bool) (B157 bool) (R162 bv256) (R164 bv256) (R173 bv256) (R176 bv256) (B179 bool) (B183 bool) (B187 bool) (B191 bool) (R198 bv256) (tacSighash bv256) (tacM0x0 bv256) (tacM0x20 bv256) (R1 bv256) (R3 bv256) (R4 bv256) (B5 bool) (R6 bv256) (B7 bool) (B8 bool) (B9 bool) (B10 bool) (R12 bv256) (B14 bool) (B15 bool) (B17 bool) (R18 bv256) (R19 bv256) (B20 bool) (B22 bool) (B16 bool) (R23 bv256) (R24 bv256) (B25 bool) (R26 bv256) (R27 bv256) (R28 bv256) (B29 bool) (B30 bool) (B31 bool) (B32 bool) (R33 bv256) (R34 bv256) (B35 bool) (B36 bool) (egg_var_5 bv256) (egg_var_4 bv256) (egg_var_3 bv256) (egg_var_2 bv256) (egg_var_7 bv256) (egg_var_6 bv256) (egg_var_1 bv256) (egg_var_0 bv256))";
+
+        check_test(program_sexp, expected, types);
     }
 }
