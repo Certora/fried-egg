@@ -12,6 +12,7 @@ use primitive_types::U256;
 use rust_evm::WrappedU256;
 use rust_evm::{eval_evm, EVM};
 use std::iter::FromIterator;
+use std::ops::BitAnd;
 use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
@@ -834,7 +835,7 @@ mod tests {
 
     fn check_test(input: &str, expected: &str, types: &str) {
         let result = start_optimize(&parse_str(input).unwrap(), &parse_str(types).unwrap());
-        assert_eq!(parse_str(&result).unwrap().to_string(), parse_str(expected).unwrap().to_string());
+        assert_eq!(parse_str(expected).unwrap().to_string(), parse_str(&result).unwrap().to_string());
     }
 
     #[test]
@@ -930,19 +931,7 @@ mod tests {
                 (b (* 2 b))
             ))
         )";
-        let expected = "(
-            (block block1 () (
-                (a 2)
-                (b 2)
-                (a 6)
-                (a 18)
-            ))
-            (block block2 () (
-                (b a)
-                (b (+ (* 2 a) 2))
-                (b (+ (* 4 a) 4))
-            ))
-        )";
+        let expected = "((block block1 () ((a 2) (b 2) (a 6) (a 18))) (block block2 () ((b a) (b (+ 2 (+ a a))) (b (* 4 (+ a 1))))))";
         let types = "((a bv256) (b bv256))";
         check_test(program_sexp, expected, types);
     }
@@ -996,7 +985,17 @@ mod tests {
             ))
         )";
         let types = "((a bv256) (b bv256) (z bv256))";
-        // We haven't implemented inference of equality across blocks yet, but when we do this test should pass
-        //check_test(program_sexp, expected, types);
+        check_test(program_sexp, expected, types);
+    }
+
+    #[test]
+    fn bwand() {
+        let program_sexp = "((block 387_1018_0_0_0_0_0 () ((R24 (& 4294967295 0)))))";
+        let expected = "((block 387_1018_0_0_0_0_0 () ((R24 0))))";
+
+
+        let types = "((R24 bv256))";
+
+        check_test(program_sexp, expected, types);
     }
 }
