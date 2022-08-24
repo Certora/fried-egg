@@ -138,6 +138,13 @@ pub struct EggEquality {
 }
 
 impl EggEquality {
+    fn to_sexp(&self) -> Sexp {
+        Sexp::List(vec![
+            parse_str(&self.lhs.to_string()).unwrap(),
+            parse_str(&self.rhs.to_string()).unwrap(),
+        ])
+    }
+
     fn rename_recexpr(recexpr: &RecExpr<EVM>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> RecExpr<EVM>{
         let mut old_recexpr: RecExpr<EVM> = Default::default();
         for node in recexpr.as_ref() {
@@ -154,7 +161,7 @@ impl EggEquality {
     pub fn rename_back(self, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> EggEquality {
         EggEquality {
             lhs: EggEquality::rename_recexpr(&self.lhs, name_to_original),
-            rhs: EggEquality::rename_recexpr(&self.rhs, name_to_original),,
+            rhs: EggEquality::rename_recexpr(&self.rhs, name_to_original),
         }
     }
 }
@@ -621,7 +628,7 @@ impl Analysis<EVM> for TacAnalysis {
 pub struct TacOptimizer {}
 
 impl TacOptimizer {
-    pub fn run(self, params: OptParams, blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggBlock> {
+    pub fn run(self, params: OptParams, blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggEquality> {
         // Find the name of this variable with respect to the current block
         let mut original_to_name = Default::default();
         // Find the original name of a variable
@@ -715,72 +722,40 @@ impl TacOptimizer {
         runner = runner.run(&logical_rules());
         log::info!("Done running rules.");
 
-        // Extract the optimized blocks back out
+        // Find out which variables are equal to each other
         let mut final_equalities: Vec<EggEquality> = vec![];
-        let mut equal_vars: HashMap<Id, Vec<Symbol>> = Default::default();
-        for (variable, eclass) in variable_roots {
+        let mut equal_vars: HashMap<Id, HashSet<Symbol>> = Default::default();
+        for (variable, old_eclass) in variable_roots {
+            let eclass = runner.egraph.find(old_eclass);
             if runner.egraph.analysis.obsolete_variables.contains(&variable) {
                 let old_var = name_to_original.get(&variable).unwrap().1;
                 if let Some(existing) = equal_vars.get_mut(&eclass) {
-                    existing.push(old_var);
+                    existing.insert(old_var);
                 } else {
-                    equal_vars.insert(eclass, vec![old_var]);
+                    let mut new_set: HashSet<Symbol> = Default::default();
+                    new_set.insert(old_var);
+                    equal_vars.insert(eclass, new_set);
                 }
             }
         }
 
         for (_class, vars) in equal_vars {
-            let expr1 = RecExpr::default();
-            expr1.add(EVM::Var(vars[0]));
-            for var in vars.iter().skip(1) {
-                let expr2 = RecExpr::default();
+            let mut expr1 = RecExpr::default();
+            let mut iter = vars.iter();
+            expr1.add(EVM::Var(*iter.next().unwrap()));
+            for var in iter {
+                let mut expr2 = RecExpr::default();
                 expr2.add(EVM::Var(*var));
-                final_equalities.push(EggEquality { lhs: expr1, rhs: expr2 });
+                final_equalities.push(EggEquality { lhs: expr1.clone(), rhs: expr2 });
             }
         }
 
 
-        let mut final_blocks = vec![];
-        for block in renamed_blocks {
-            let mut new_assignments = vec![];
-
-            for assignment in block.assignments {
-                let rhs_id = variable_roots.get(&assignment.lhs).unwrap();
-                
-                let target_type = *runner.egraph.analysis.typemap.get(&name_to_original[&assignment.lhs].1).unwrap_or_else(|| {
-                    panic!("no type for {}", name_to_original[&assignment.lhs].1);
-                });
-
-                // How much should we prefer extracting a linear thing compared to the general cost function? "0" is not at all
-                let linear_preferred_factor: BigUint = "0".parse().unwrap();
-                if let Some((mut current_best, current_best_cost)) = GeneralAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
-                    if let Some((best2, cost2)) = LinearAnalysis::get_best_from_eclass(&runner.egraph, *rhs_id, target_type) {
-                        if cost2 < current_best_cost*linear_preferred_factor {
-                            current_best = best2;
-                        }
-                    }
-
-                    let new_assignment = EggAssign {
-                        lhs: assignment.lhs,
-                        rhs: current_best,
-                    };
-                    new_assignments.push(new_assignment.rename_back(&name_to_original));
-                } else {
-                    panic!("Could not find original expression using GeneralAnalysis for {} with type {}", assignment.rhs, target_type);
-                }
-            }
-
-            final_blocks.push(EggBlock {
-                id: block.id,
-                predecessors: block.predecessors,
-                assignments: new_assignments,
-            });
-        }
-        final_blocks
+        final_equalities
     }
 }
 
-fn start_blocks(blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggBlock> {
+fn start_blocks(blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggEquality> {
     let params: OptParams = OptParams::default();
     TacOptimizer {}.run(params, blocks, typemap)
 }
@@ -820,7 +795,7 @@ pub fn start_optimize(blocks_in: &Sexp, typemap_in: &Sexp) -> String {
 
     let blocks_list = start_blocks(blocks, parse_type_map(typemap_in))
         .iter()
-        .map(|block| block.to_sexp())
+        .map(|equality| equality.to_sexp())
         .collect();
 
     Sexp::List(blocks_list).to_string()
