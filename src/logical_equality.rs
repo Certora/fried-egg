@@ -2,7 +2,7 @@ use egg::{rewrite, Analysis, DidMerge, Id, Language, Pattern, RecExpr, Rewrite, 
 use primitive_types::U256;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use rust_evm::{eval_evm, EVM};
+use rust_evm::{eval_evm, EVM, Constant};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -97,29 +97,30 @@ type EGraph = egg::EGraph<EVM, LogicalAnalysis>;
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
-    cvec: Vec<U256>,
-    constant: Option<U256>,
+    cvec: Vec<Constant>,
+    constant: Option<Constant>,
 }
 
 fn random_256() -> U256 {
-    let mut rng = rand::thread_rng();
+    let mut rng = thread_rng();
     let lower = U256::from_dec_str(&rng.gen::<u128>().to_string()).unwrap();
     let dummy_vec: [Id; 2] = [Id::from(0), Id::from(0)];
-    let upper = eval_evm(
-        &EVM::ShiftLeft(dummy_vec),
-        Some(lower),
-        Some(U256::from_dec_str("128").unwrap()),
-    )
-    .unwrap();
+    let upper = eval_evm(&EVM::ShiftLeft(dummy_vec), Some(Constant::Num(lower)), Some(Constant::Num(U256::from_dec_str("128").unwrap())), None).unwrap();
     let lower_2 = U256::from_dec_str(&rng.gen::<u128>().to_string()).unwrap();
-    eval_evm(&EVM::BWOr(dummy_vec), Some(lower_2), Some(upper)).unwrap()
+    let res = eval_evm(&EVM::BWOr(dummy_vec), Some(Constant::Num(lower_2)), Some(upper), None).unwrap();
+    if let Constant::Num(n) = res {
+        return n
+    } else {
+        panic!("Got a boolean from evaluation of BWOr which is quite a bad bug I have to say")
+    }
 }
+
 
 const CVEC_LEN: usize = 30;
 
 #[derive(Default, Debug, Clone)]
 pub struct LogicalAnalysis {
-    special_constants: Vec<U256>,
+    special_constants: Vec<Constant>,
     cvec_enabled: bool,
 }
 impl Analysis<EVM> for LogicalAnalysis {
@@ -129,7 +130,7 @@ impl Analysis<EVM> for LogicalAnalysis {
         // cvecs used for fuzzing in the egraph
         let cvec = if egraph.analysis.cvec_enabled {
             match enode {
-                EVM::Var(_) => {
+                EVM::BitVar(_) => {
                     let mut cvec = vec![];
                     for c in &egraph.analysis.special_constants {
                         cvec.push(*c);
@@ -140,7 +141,16 @@ impl Analysis<EVM> for LogicalAnalysis {
                         cvec.push(*c);
                     }
                     for _i in 0..(CVEC_LEN.saturating_sub(cvec.len())) {
-                        cvec.push(random_256());
+                        cvec.push(Constant::Num(random_256()));
+                    }
+
+                    cvec[..CVEC_LEN].to_vec()
+                }
+                EVM::BoolVar(_) => {
+                    let mut cvec = vec![];
+                    let mut rng = thread_rng();
+                    for _i in 0..(CVEC_LEN.saturating_sub(cvec.len())) {
+                        cvec.push(Constant::Bool(rng.gen_bool(0.5)));
                     }
 
                     cvec[..CVEC_LEN].to_vec()
@@ -150,14 +160,16 @@ impl Analysis<EVM> for LogicalAnalysis {
                     let mut child_const = vec![];
                     enode.for_each(|child| child_const.push(&egraph[child].data.cvec));
                     for i in 0..CVEC_LEN {
-                        let first = child_const.get(0).map(|v| *v.get(i).unwrap());
-                        let second = child_const.get(1).map(|v| *v.get(i).unwrap());
+                        let first = child_const.get(0).map(|v| v.get(i).unwrap().clone());
+                        let second = child_const.get(1).map(|v| v.get(i).unwrap().clone());
 
-                        let res = eval_evm(enode, first, second);
+                        let third = child_const.get(2).map(|v| v.get(i).unwrap().clone());
+
+                        let res = eval_evm(enode, first, second, third);
                         if res.is_none() {
                             panic!(
                                 "eval_evm for {:?} failed, with children {:?} and {:?}",
-                                enode, first, second
+                                enode, first, second,
                             );
                         }
 
@@ -174,7 +186,8 @@ impl Analysis<EVM> for LogicalAnalysis {
         enode.for_each(|child| child_const.push(egraph[child].data.constant));
         let first = child_const.get(0).unwrap_or(&None);
         let second = child_const.get(1).unwrap_or(&None);
-        let constant = eval_evm(enode, *first, *second);
+        let third = child_const.get(2).unwrap_or(&None);
+        let constant = eval_evm(enode, *first, *second, *third);
 
         Data { cvec, constant }
     }
@@ -221,9 +234,9 @@ pub struct LogicalRunner {
 impl LogicalRunner {
     pub fn new() -> Self {
         let constants = vec![
-            U256::zero(),
-            U256::one(),
-            U256::zero().overflowing_sub(U256::one()).0,
+            Constant::Num(U256::zero()),
+            Constant::Num(U256::one()),
+            Constant::Num(U256::zero().overflowing_sub(U256::one()).0),
         ];
         let analysis = LogicalAnalysis {
             special_constants: constants,
@@ -238,16 +251,18 @@ impl LogicalRunner {
 
     fn add_constants(egraph: &mut EGraph, expr: &RecExpr<EVM>) {
         for node in expr.as_ref() {
-            if let EVM::Num(c) = node {
-                egraph.analysis.special_constants.push(c.value);
+            if let EVM::Constant(c) = node {
+                egraph.analysis.special_constants.push(*c);
+            }
+            if let EVM::Constant(Constant::Num(num)) = node {
                 egraph
                     .analysis
                     .special_constants
-                    .push(c.value.overflowing_add(U256::one()).0);
+                    .push(Constant::Num(num.overflowing_add(U256::one()).0));
                 egraph
                     .analysis
                     .special_constants
-                    .push(c.value.overflowing_sub(U256::one()).0);
+                    .push(Constant::Num(num.overflowing_sub(U256::one()).0));
             }
         }
     }

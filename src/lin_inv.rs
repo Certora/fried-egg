@@ -9,10 +9,8 @@ use egg::{ENodeOrVar, Pattern, RecExpr, Justification};
 use itertools::Itertools;
 use num_bigint::BigUint;
 use primitive_types::U256;
-use rust_evm::WrappedU256;
-use rust_evm::{eval_evm, EVM};
+use rust_evm::{BoolVar, BitVar, Constant, eval_evm, EVM};
 use std::iter::FromIterator;
-use std::ops::BitAnd;
 use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
@@ -21,6 +19,9 @@ use indexmap::IndexSet;
 use crate::logical_equality::logical_rules;
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
+type NameToOriginal = HashMap<EVM, (EVM, BlockId)>;
+type OriginalToName = HashMap<(EVM, BlockId), EVM>;
+type OriginalToNames = HashMap<EVM, Vec<EVM>>;
 
 // NOTE: this should be "freshness" perhaps. Oldest vars have least age.
 //
@@ -103,9 +104,9 @@ impl EggBlock {
     // Rename all the variables to unique names to avoid clashing with other blocks
     pub fn rename_variables(
         &self,
-        name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
-        original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
-        original_to_names: &mut HashMap<Symbol, Vec<Symbol>>,
+        name_to_original: &mut NameToOriginal,
+        original_to_name: &mut OriginalToName,
+        original_to_names: &mut OriginalToNames,
     ) -> EggBlock {
         let mut new_assignments = Vec::new();
         for assign in self.assignments.iter() {
@@ -127,7 +128,7 @@ impl EggBlock {
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct EggAssign {
-    pub lhs: Symbol,
+    pub lhs: EVM,
     pub rhs: RecExpr<EVM>,
 }
 
@@ -145,12 +146,12 @@ impl EggEquality {
         ])
     }
 
-    fn rename_recexpr(recexpr: &RecExpr<EVM>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> RecExpr<EVM>{
+    fn rename_recexpr(recexpr: &RecExpr<EVM>, name_to_original: &NameToOriginal) -> RecExpr<EVM>{
         let mut old_recexpr: RecExpr<EVM> = Default::default();
         for node in recexpr.as_ref() {
-            if let EVM::Var(var) = node {
-                let old_var = name_to_original.get(&var).unwrap().1;
-                old_recexpr.add(EVM::Var(old_var.clone()));
+            if let EVM::BoolVar(_) | EVM::BitVar(_) = node {
+                let old_var = &name_to_original.get(&node).unwrap().0;
+                old_recexpr.add(old_var.clone());
             } else {
                 old_recexpr.add(node.clone());
             }
@@ -158,7 +159,7 @@ impl EggEquality {
         old_recexpr
     }
 
-    pub fn rename_back(self, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> EggEquality {
+    pub fn rename_back(self, name_to_original: &NameToOriginal) -> EggEquality {
         EggEquality {
             lhs: EggEquality::rename_recexpr(&self.lhs, name_to_original),
             rhs: EggEquality::rename_recexpr(&self.rhs, name_to_original),
@@ -169,7 +170,7 @@ impl EggEquality {
 impl EggAssign {
     pub fn new(lhs: &str, rhs: &str) -> Self {
         Self {
-            lhs: lhs.into(),
+            lhs: EVM::from_op(lhs, vec![]).unwrap(),
             rhs: rhs.parse().unwrap(),
         }
     }
@@ -199,39 +200,47 @@ impl EggAssign {
     pub fn rename_variables(
         &self,
         block: BlockId,
-        name_to_original: &mut HashMap<Symbol, (BlockId, Symbol)>,
-        original_to_name: &mut HashMap<(Symbol, BlockId), Symbol>,
-        original_to_names: &mut HashMap<Symbol, Vec<Symbol>>,
+        name_to_original: &mut NameToOriginal,
+        original_to_name: &mut OriginalToName,
+        original_to_names: &mut OriginalToNames,
     ) -> EggAssign {
         let mut new_rhs: RecExpr<EVM> = Default::default();
         for node in self.rhs.as_ref() {
-            if let EVM::Var(var) = node {
-                if let Some(existing) = original_to_name.get(&(block, *var)) {
-                    new_rhs.add(EVM::Var(existing.clone()));
+            if let EVM::BoolVar(_) | EVM::BitVar(_) = node {
+                if let Some(existing) = original_to_name.get(&(node.clone(), block)) {
+                    new_rhs.add(existing.clone());
                 } else {
-                    let new_var = format!("rust_{}", name_to_original.len()).into();
-                    original_to_name.insert((block, *var), new_var);
-                    name_to_original.insert(new_var, (block, *var));
-                    new_rhs.add(EVM::Var(new_var));
+                    let new_var = if let EVM::BoolVar(_) = node {
+                        EVM::BoolVar(BoolVar(format!("bool_rust_{}", name_to_original.len()).into()))
+                    } else {
+                        EVM::BitVar(BitVar(format!("bit256_rust_{}", name_to_original.len()).into()))
+                    };
+                    original_to_name.insert((node.clone(), block), new_var.clone());
+                    name_to_original.insert(new_var.clone(), (node.clone(), block));
+                    new_rhs.add(new_var.clone());
 
-                    if original_to_names.get(&var).is_none() {
-                        original_to_names.insert(*var, vec![]);
+                    if original_to_names.get(node).is_none() {
+                        original_to_names.insert(node.clone(), vec![]);
                     }
-                    original_to_names.get_mut(&var).unwrap().push(new_var);
+                    original_to_names.get_mut(&node).unwrap().push(new_var);
                 }
             } else {
                 new_rhs.add(node.clone());
             }
         }
 
-        let new_lhs = format!("rust_{}", name_to_original.len()).into();
-        original_to_name.insert((block, self.lhs), new_lhs);
-        name_to_original.insert(new_lhs, (block, self.lhs));
+        let new_lhs = if let EVM::BoolVar(_) = self.lhs {
+            EVM::BoolVar(BoolVar(format!("bool_rust_{}", name_to_original.len()).into()))
+        } else {
+            EVM::BitVar(BitVar(format!("bit256_rust_{}", name_to_original.len()).into()))
+        };
+        original_to_name.insert((self.lhs.clone(), block), new_lhs.clone());
+        name_to_original.insert(new_lhs.clone(), (self.lhs.clone(), block));
         
         if original_to_names.get(&self.lhs).is_none() {
-            original_to_names.insert(self.lhs, vec![]);
+            original_to_names.insert(self.lhs.clone(), vec![]);
         }
-        original_to_names.get_mut(&self.lhs).unwrap().push(new_lhs);
+        original_to_names.get_mut(&self.lhs).unwrap().push(new_lhs.clone());
 
         EggAssign {
             lhs: new_lhs,
@@ -240,14 +249,10 @@ impl EggAssign {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Data {
     // A constant for this eclass and the pattern for how it was computed
-    constant: Option<(U256, PatternAst<EVM>, Subst)>,
-    // The best enodes per type for linear expressions
-    type_to_best_linear: BestForType,
-    // The best enode per type with a general cost function
-    type_to_best_general: BestForType,
+    constant: Option<(Constant, PatternAst<EVM>, Subst)>,
 }
 
 // A map from type to a tuple (enode, cost, type of children)
@@ -255,295 +260,15 @@ pub struct Data {
 type BestForType = HashMap<Symbol, (EVM, BigUint, Symbol)>;
 
 #[derive(Debug, Clone)]
-pub struct LinearAnalysis {
-}
-
-#[derive(Debug, Clone)]
-pub struct GeneralAnalysis {
-}
-
-#[derive(Debug, Clone)]
 pub struct TacAnalysis {
-    pub linear_analysis: LinearAnalysis,
-    pub general_analysis: GeneralAnalysis,
     pub typemap: HashMap<Symbol, Symbol>,
-    pub name_to_original: HashMap<Symbol, (BlockId, Symbol)>,
+    pub name_to_original: NameToOriginal,
     // A set of variables that are no longer needed because they were renamed intermediates
     // We proved all the paths are the same for these variables in the DSA
-    pub obsolete_variables: HashSet<Symbol>,
+    pub obsolete_variables: HashSet<EVM>,
 
     // A set of unions that actually did anything (unioned two eclasses)
     pub important_unions: RefCell<Vec<(Id, Id)>>
-}
-
-impl GeneralAnalysis {
-    pub fn my_build_recexpr<F>(class: Id, target_type: Symbol, mut get_node: F) -> RecExpr<EVM>
-    where
-        F: FnMut(Id, Symbol) -> (EVM, Symbol),
-    {
-        let (node, newtype) = get_node(class, target_type);
-        let mut set = IndexSet::<EVM>::default();
-        let mut ids = HashMap::<Id, Id>::default();
-        let mut todo: Vec<(Id, Symbol)> = node.children().iter().map(|id| (*id, newtype)).collect();
-
-        while let Some((id, this_type)) = todo.last().copied() {
-            if ids.contains_key(&id) {
-                todo.pop();
-                continue;
-            }
-
-            let (node, child_type) = get_node(id, this_type);
-
-            // check to see if we can do this node yet
-            let mut ids_has_all_children = true;
-            for child in node.children() {
-                if !ids.contains_key(child) {
-                    ids_has_all_children = false;
-                    todo.push((*child, child_type));
-                }
-            }
-
-            // all children are processed, so we can lookup this node safely
-            if ids_has_all_children {
-                let node = node.map_children(|id| ids[&id]);
-                let new_id = set.insert_full(node).0;
-                ids.insert(id, Id::from(new_id));
-                todo.pop();
-            }
-        }
-
-        // finally, add the root node and create the expression
-        let mut nodes: Vec<EVM> = set.into_iter().collect();
-        nodes.push(node.clone().map_children(|id| ids[&id]));
-        RecExpr::from(nodes)
-    }
-
-
-    pub fn get_best_from_eclass(egraph: &egg::EGraph<EVM, TacAnalysis>, eclass: Id, target_type: Symbol) -> Option<(RecExpr<EVM>, BigUint)> {
-        if !egraph[eclass].data.type_to_best_general.contains_key(&target_type) {
-            return None
-        }
-
-        let get_enode = |id, this_type| (egraph[id].data.type_to_best_general[&this_type].0.clone(), egraph[id].data.type_to_best_general[&this_type].2);
-        return Some((
-            Self::my_build_recexpr(eclass, target_type, get_enode),
-            egraph[eclass].data.type_to_best_general[&target_type].1.clone()
-        ));
-    }
-
-    pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>, obsolete_variables: &HashSet<Symbol>) -> BestForType {
-        let mut best: BestForType = HashMap::new();
-
-        let cost_sum = |child_type: Symbol| -> Option<BigUint> {
-            let mut sum = "0".parse().unwrap();
-            let mut success = true;
-            enode.for_each(|child| {
-                if let Some((_, cost, _)) = egraph[child].data.type_to_best_general.get(&child_type) {
-                    sum += cost.clone();
-                } else {
-                    success = false;
-                }
-            });
-            if success {
-                Some(sum)
-            } else {
-                None
-            }
-        };
-
-        let good_cost: BigUint = "5".parse().unwrap();
-        let bad_cost: BigUint = "10".parse().unwrap();
-        let very_bad_cost: BigUint = "50".parse().unwrap();
-        let var_value = "5".parse().unwrap();
-        let num_value = "2".parse().unwrap();
-        let bvtype = "bv256".into();
-        let booltype = "bool".into();
-
-        let mut type_to_type = |childtype, outputtype, cost| {
-            if let Some(child_val) = cost_sum(childtype) {
-                let new_cost = child_val + cost;
-                if let Some((_, existing, _)) = best.get(&outputtype) {
-                    if existing < &new_cost {
-                        return;
-                    }
-                }
-                best.insert(outputtype, (enode.clone(), new_cost, childtype));
-            }
-        };
-
-
-        match enode {
-            EVM::Num(n) => {
-                let cost: BigUint = if n.value < "1000".parse().unwrap() {
-                    "1".parse().unwrap()
-                } else {
-                    num_value
-                };
-                // when there are no children, the type part doesn't matter
-                best.insert("bv256".into(), (enode.clone(), cost.clone(), "nochildren".into()));
-                if n.value <= "1".parse().unwrap() {
-                    best.insert("bool".into(), (enode.clone(), cost, "nochildren".into()));
-                }
-            }
-
-            EVM::Var(v) => {
-                if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
-                    let cost = if obsolete_variables.contains(v) {
-                        very_bad_cost
-                    } else {
-                        var_value
-                    };
-                    best.insert(*var_type, (enode.clone(), cost, "nochildren".into()));
-                } else {
-                    panic!("Variable {} has no type in typemap", &name_to_original.get(&v).unwrap().1);
-                }
-            }
-
-            EVM::Mul(_) => type_to_type(bvtype, bvtype, bad_cost),
-            EVM::Add(_) => type_to_type(bvtype, bvtype, good_cost),
-            EVM::Sub(_) => type_to_type(bvtype, bvtype, good_cost),
-            EVM::Div(_) => type_to_type(bvtype, bvtype, very_bad_cost),
-            EVM::BWAnd(_) => type_to_type(bvtype, bvtype, bad_cost),
-            EVM::BWOr(_) => type_to_type(bvtype, bvtype, bad_cost),
-            EVM::ShiftLeft(_) => type_to_type(bvtype, bvtype, bad_cost),
-            EVM::ShiftRight(_) => type_to_type(bvtype, bvtype, bad_cost),
-            EVM::LOr(_) => type_to_type(booltype, booltype, good_cost),
-            EVM::LAnd(_) => type_to_type(booltype, booltype, good_cost),
-
-            EVM::Gt(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Ge(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Lt(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Le(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Eq(_) => {
-                type_to_type(bvtype, booltype, good_cost.clone());
-                type_to_type(booltype, booltype, good_cost);
-            }
-            EVM::Slt(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Sle(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Sgt(_) => type_to_type(bvtype, booltype, good_cost),
-            EVM::Sge(_) => type_to_type(bvtype, booltype, good_cost),
-
-            EVM::LNot(_) => type_to_type(booltype, booltype, good_cost),
-            EVM::BWNot(_) => type_to_type(bvtype, bvtype, bad_cost),
-
-            EVM::Exp(_) => type_to_type(bvtype, bvtype, very_bad_cost),
-
-            EVM::Apply(_) => ()
-        }
-
-        best
-    }
-}
-
-impl LinearAnalysis {
-    pub fn get_best_from_eclass(egraph: &egg::EGraph<EVM, TacAnalysis>, eclass: Id, target_type: Symbol) -> Option<(RecExpr<EVM>, BigUint)> {
-        if !egraph[eclass].data.type_to_best_linear.contains_key(&target_type) {
-            return None
-        }
-
-        let get_enode = |id, this_type| (egraph[id].data.type_to_best_linear[&this_type].0.clone(), egraph[id].data.type_to_best_linear[&this_type].2);
-        return Some((
-            GeneralAnalysis::my_build_recexpr(eclass, target_type, get_enode),
-            egraph[eclass].data.type_to_best_linear[&target_type].1.clone()
-        ));
-    }
-
-
-    pub fn make(&self, egraph: &egg::EGraph<EVM, TacAnalysis>, enode: &EVM, typemap: &HashMap<Symbol, Symbol>, name_to_original: &HashMap<Symbol, (BlockId, Symbol)>) -> BestForType {
-        let mut best: BestForType = HashMap::new();
-        let add_value: BigUint = "40".parse().unwrap();
-        let mul_value: BigUint = "20".parse().unwrap();
-        let var_value = "5".parse().unwrap();
-        let num_value = "2".parse().unwrap();
-
-        let cost_sum = |child_type: Symbol| -> Option<BigUint> {
-            let mut sum = "0".parse().unwrap();
-            let mut success = true;
-            enode.for_each(|child| {
-                if let Some((_, cost, _)) = egraph[child].data.type_to_best_linear.get(&child_type) {
-                    sum += cost.clone();
-                } else {
-                    success = false;
-                }
-            });
-            if success {
-                Some(sum)
-            } else {
-                None
-            }
-        };
-
-
-        match enode {
-            EVM::Num(n) => {
-                let cost = if n.value < "1000".parse().unwrap() {
-                    "1".parse().unwrap()
-                } else {
-                    num_value
-                };
-                best.insert("bv256".into(), (enode.clone(), cost, "nochildren".into()));
-            }
-
-            EVM::Var(v) => {
-                if let Some(var_type) = typemap.get(&name_to_original.get(&v).unwrap().1) {
-                    best.insert(*var_type, (enode.clone(), var_value, "nochildren".into()));
-                } else {
-                    panic!("Variable {} has no type in typemap", &name_to_original.get(&v).unwrap().1);
-                }
-            }
-
-            // Only multiplications of a constant and variable are accepted
-            EVM::Mul([child1, child2]) => {
-                if let (Some((_, costafound, _)), Some((_, costbfound, _))) = (
-                    egraph[*child1].data.type_to_best_linear.get(&"bv256".into()),
-                    egraph[*child2].data.type_to_best_linear.get(&"bv256".into())) {
-                    let mut costa = costafound.clone();
-                    let mut costb = costbfound.clone();
-                    if costb < costa {
-                        std::mem::swap(&mut costa, &mut costb);
-                    }
-                    if costa < num_value && costb < var_value {
-                        best.insert("bv256".into(), (enode.clone(), costa + costb + mul_value, "bv256".into()));
-                    }
-                }
-            }
-
-            EVM::Add(_) => {
-                if let Some(child_val) = cost_sum("bv256".into()) {
-                    best.insert("bv256".into(), (enode.clone(), add_value + child_val, "bv256".into()));
-                }
-            }
-            EVM::Sub(_) => {
-                if let Some(child_val) = cost_sum("bv256".into()) {
-                    best.insert("bv256".into(), (enode.clone(), add_value + child_val, "bv256".into()));
-                }
-            }
-            _ => {}
-        }
-
-        best
-    }
-}
-
-impl TacAnalysis {
-    pub fn merge_best_for_type(to: &mut BestForType, from: &BestForType) -> bool {
-        let mut merge_a = false;
-        for (key, (enode, cost, child_type)) in from {
-            if let Some((enode2, cost2, child_type2)) = to.get_mut(key) {
-                if cost < cost2 {
-                    *enode2 = enode.clone();
-                    *cost2 = cost.clone();
-                    *child_type2 = child_type.clone();
-                    merge_a = true;
-                }
-            } else {
-                to.insert(key.clone(), (enode.clone(), cost.clone(), child_type.clone()));
-                merge_a = true;
-            }
-        }
-
-        merge_a
-    }
 }
 
 impl Analysis<EVM> for TacAnalysis {
@@ -554,7 +279,8 @@ impl Analysis<EVM> for TacAnalysis {
         enode.for_each(|child| child_const.push(egraph[child].data.constant.as_ref().map(|x| x.0)));
         let first = child_const.get(0).unwrap_or(&None);
         let second = child_const.get(1).unwrap_or(&None);
-        let constant_option = eval_evm(enode, *first, *second);
+        let third = child_const.get(2).unwrap_or(&None);
+        let constant_option = eval_evm(enode, *first, *second, *third);
         let constant = if let Some(c) = constant_option {
             let mut expr = PatternAst::default();
             let mut subst = Subst::default();
@@ -564,7 +290,7 @@ impl Analysis<EVM> for TacAnalysis {
                     subst.insert(var, child);
                     expr.add(ENodeOrVar::Var(var))
                 } else {
-                    expr.add(ENodeOrVar::ENode(EVM::new(
+                    expr.add(ENodeOrVar::ENode(EVM::from(
                         egraph[child].data.constant.as_ref().unwrap().0,
                     )))
                 }
@@ -576,9 +302,7 @@ impl Analysis<EVM> for TacAnalysis {
         };
 
         Data {
-            constant,
-            type_to_best_linear: egraph.analysis.linear_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original),
-            type_to_best_general: egraph.analysis.general_analysis.make(egraph, enode, &egraph.analysis.typemap, &egraph.analysis.name_to_original, &egraph.analysis.obsolete_variables),
+            constant
         }
     }
 
@@ -594,10 +318,6 @@ impl Analysis<EVM> for TacAnalysis {
             (Some(a), Some(b)) => assert_eq!(a.0, b.0),
         }
 
-        merge_a |= TacAnalysis::merge_best_for_type(&mut to.type_to_best_linear, &from.type_to_best_linear);
-        merge_a |= TacAnalysis::merge_best_for_type(&mut to.type_to_best_general, &from.type_to_best_general);
-
-
         DidMerge(merge_a, true)
     }
 
@@ -606,7 +326,7 @@ impl Analysis<EVM> for TacAnalysis {
     fn modify(egraph: &mut EGraph, id: Id) {
         if let Some((c, lhs, subst)) = egraph[id].data.constant.clone() {
             let mut const_pattern = PatternAst::default();
-            const_pattern.add(ENodeOrVar::ENode(EVM::new(c)));
+            const_pattern.add(ENodeOrVar::ENode(EVM::from(c)));
             let (id, _added) =
                 egraph.union_instantiations(&lhs, &const_pattern, &subst, "constant_folding");
 
@@ -643,8 +363,6 @@ impl TacOptimizer {
             .collect();
 
         let analysis = TacAnalysis {
-            linear_analysis: LinearAnalysis {},
-            general_analysis: GeneralAnalysis {},
             typemap,
             name_to_original: name_to_original.clone(),
             obsolete_variables: Default::default(),
@@ -655,24 +373,24 @@ impl TacOptimizer {
         
 
         // Add all the blocks to the egraph, keeping track of the eclasses for each variable
-        let mut variable_roots: HashMap<Symbol, Id> = Default::default();
-        let mut unbound_variables: HashSet<Symbol> = Default::default();
+        let mut variable_roots: HashMap<EVM, Id> = Default::default();
+        let mut unbound_variables: HashSet<EVM> = Default::default();
         for block in renamed_blocks.iter() {
             for assign in block.assignments.iter() {
                 let mut rhs_pattern: PatternAst<EVM> = Default::default();
                 let mut subst = Subst::default();
                 let mut subst_size = 0;
                 for node in assign.rhs.as_ref() {
-                    if let EVM::Var(name) = node {
+                    if let EVM::BitVar(_) | EVM::BoolVar(_) = node {
                         // add unbound variables to the egraph
-                        if variable_roots.get(name).is_none() {
-                            variable_roots.insert(*name, egraph.add(node.clone()));
-                            unbound_variables.insert(*name);
+                        if variable_roots.get(node).is_none() {
+                            variable_roots.insert(node.clone(), egraph.add(node.clone()));
+                            unbound_variables.insert(node.clone());
                         }
                         let var = ("?".to_string() + &format!("{}", subst_size))
                             .parse()
                             .unwrap();
-                        subst.insert(var, *variable_roots.get(name).unwrap());
+                        subst.insert(var, *variable_roots.get(node).unwrap());
                         subst_size += 1;
                         rhs_pattern.add(ENodeOrVar::Var(var));
                     } else {
@@ -681,7 +399,7 @@ impl TacOptimizer {
                 }
 
                 let id = egraph.add_instantiation(&rhs_pattern, &subst);
-                variable_roots.insert(assign.lhs, id);
+                variable_roots.insert(assign.lhs.clone(), id);
             }
         }
 
@@ -697,10 +415,10 @@ impl TacOptimizer {
             // When we prove all instances of a variable are the same, get rid of intermediate renamings
             .with_hook(move |runner| {
                 for (_original, names) in &original_to_names {
-                    let mut unbound: Vec<Symbol> = vec![];
+                    let mut unbound: Vec<EVM> = vec![];
                     let mut ids: Vec<Id> = names.iter().filter_map(|name|
                         if unbound_variables.contains(name) {
-                            unbound.push(*name);
+                            unbound.push(name.clone());
                             None
                         } else {
                             Some(runner.egraph.find(*variable_roots_clone.get(name).unwrap()))
@@ -724,16 +442,16 @@ impl TacOptimizer {
 
         // Find out which variables are equal to each other
         let mut final_equalities: Vec<EggEquality> = vec![];
-        let mut equal_vars: HashMap<Id, HashSet<Symbol>> = Default::default();
+        let mut equal_vars: HashMap<Id, HashSet<EVM>> = Default::default();
         for (variable, old_eclass) in variable_roots {
             let eclass = runner.egraph.find(old_eclass);
             if runner.egraph.analysis.obsolete_variables.contains(&variable) {
-                let old_var = name_to_original.get(&variable).unwrap().1;
+                let old_var = &name_to_original.get(&variable).unwrap().0;
                 if let Some(existing) = equal_vars.get_mut(&eclass) {
-                    existing.insert(old_var);
+                    existing.insert(old_var.clone());
                 } else {
-                    let mut new_set: HashSet<Symbol> = Default::default();
-                    new_set.insert(old_var);
+                    let mut new_set: HashSet<EVM> = Default::default();
+                    new_set.insert(old_var.clone());
                     equal_vars.insert(eclass, new_set);
                 }
             }
@@ -742,10 +460,10 @@ impl TacOptimizer {
         for (_class, vars) in equal_vars {
             let mut expr1 = RecExpr::default();
             let mut iter = vars.iter();
-            expr1.add(EVM::Var(*iter.next().unwrap()));
+            expr1.add(iter.next().unwrap().clone());
             for var in iter {
                 let mut expr2 = RecExpr::default();
-                expr2.add(EVM::Var(*var));
+                expr2.add(var.clone());
                 final_equalities.push(EggEquality { lhs: expr1.clone(), rhs: expr2 });
             }
         }
