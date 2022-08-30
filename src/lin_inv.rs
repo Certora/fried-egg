@@ -262,7 +262,6 @@ type BestForType = HashMap<Symbol, (EVM, BigUint, Symbol)>;
 
 #[derive(Debug, Clone)]
 pub struct TacAnalysis {
-    pub typemap: HashMap<Symbol, Symbol>,
     pub name_to_original: NameToOriginal,
     // A set of variables that are no longer needed because they were renamed intermediates
     // We proved all the paths are the same for these variables in the DSA
@@ -403,7 +402,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
 pub struct TacOptimizer {}
 
 impl TacOptimizer {
-    pub fn run(self, params: OptParams, blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggEquality> {
+    pub fn run(self, params: OptParams, blocks: Vec<EggBlock>) -> Vec<EggEquality> {
         // Find the name of this variable with respect to the current block
         let mut original_to_name = Default::default();
         // Find the original name of a variable
@@ -418,7 +417,6 @@ impl TacOptimizer {
             .collect();
 
         let analysis = TacAnalysis {
-            typemap,
             name_to_original: name_to_original.clone(),
             obsolete_variables: Default::default(),
             important_unions: Default::default(),
@@ -528,34 +526,14 @@ impl TacOptimizer {
     }
 }
 
-fn start_blocks(blocks: Vec<EggBlock>, typemap: HashMap<Symbol, Symbol>) -> Vec<EggEquality> {
+fn start_blocks(blocks: Vec<EggBlock>) -> Vec<EggEquality> {
     let params: OptParams = OptParams::default();
-    TacOptimizer {}.run(params, blocks, typemap)
-}
-
-fn parse_type_map(sexp: &Sexp) -> HashMap<Symbol, Symbol> {
-    let mut typemap: HashMap<Symbol, Symbol> = Default::default();
-    if let Sexp::List(list) = sexp {
-        for entry in list {
-            if let Sexp::List(pair) = entry {
-                if let [Sexp::String(name), Sexp::String(type_name)] = &pair[..] {
-                    typemap.insert(name.into(), type_name.into());
-                } else {
-                    panic!("Invalid type map entry: {:?}", pair);
-                }
-            } else {
-                panic!("Expected list of pairs in type map.");
-            }
-        }
-    } else {
-        panic!("Expected a list of type mappings.");
-    }
-    typemap
+    TacOptimizer {}.run(params, blocks)
 }
 
 // Entry point- parse Sexp and run optimization
 // We expect all the blocks to be DSA
-pub fn start_optimize(blocks_in: &Sexp, typemap_in: &Sexp) -> String {
+pub fn start_optimize(blocks_in: &Sexp) -> String {
     let mut blocks: Vec<EggBlock> = vec![];
 
     if let Sexp::List(list) = blocks_in {
@@ -566,7 +544,7 @@ pub fn start_optimize(blocks_in: &Sexp, typemap_in: &Sexp) -> String {
         panic!("Expected a list of blocks");
     }
 
-    let blocks_list = start_blocks(blocks, parse_type_map(typemap_in))
+    let blocks_list = start_blocks(blocks)
         .iter()
         .map(|equality| equality.to_sexp())
         .collect();
@@ -582,7 +560,7 @@ mod tests {
     use rust_evm::{eval_evm, EVM};
 
     fn check_test(input: &str, expected: &str, types: &str) {
-        let result = start_optimize(&parse_str(input).unwrap(), &parse_str(types).unwrap());
+        let result = start_optimize(&parse_str(input).unwrap());
         assert_eq!(parse_str(expected).unwrap().to_string(), parse_str(&result).unwrap().to_string());
     }
 
