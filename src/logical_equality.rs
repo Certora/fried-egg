@@ -84,7 +84,7 @@ pub fn logical_rules<A: Analysis<EVM>>() -> Vec<Rewrite<EVM, A>> {
 
     let manual_rules = vec![
         rewrite!("distr*+"; "(* (+ ?a ?b) ?c)" => "(+ (* ?a ?c) (* ?b ?c))"),
-        rewrite!("doubleneg!=="; "(! (== (== ?x ?y) 0))" => "(== ?x ?y)"),
+        rewrite!("doubleneg!=="; "(! (bit== (bit== ?x ?y) 0))" => "(bit== ?x ?y)"),
     ];
     for rule in manual_rules {
         res.push(rule);

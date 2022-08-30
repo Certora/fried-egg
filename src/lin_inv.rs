@@ -9,14 +9,14 @@ use egg::{ENodeOrVar, Pattern, RecExpr, Justification};
 use itertools::Itertools;
 use num_bigint::BigUint;
 use primitive_types::U256;
-use rust_evm::{BoolVar, BitVar, Constant, eval_evm, EVM};
+use rust_evm::{BoolVar, BitVar, Constant, eval_evm, EVM, Type};
 use std::iter::FromIterator;
 use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 use indexmap::IndexSet;
 
-use crate::logical_equality::logical_rules;
+use crate::logical_equality::get_pregenerated_rules;
 
 pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 type NameToOriginal = HashMap<EVM, (EVM, BlockId)>;
@@ -213,7 +213,7 @@ impl EggAssign {
                     let new_var = if let EVM::BoolVar(_) = node {
                         EVM::BoolVar(BoolVar(format!("bool_rust_{}", name_to_original.len()).into()))
                     } else {
-                        EVM::BitVar(BitVar(format!("bit256_rust_{}", name_to_original.len()).into()))
+                        EVM::BitVar(BitVar(format!("bv256_rust_{}", name_to_original.len()).into()))
                     };
                     original_to_name.insert((node.clone(), block), new_var.clone());
                     name_to_original.insert(new_var.clone(), (node.clone(), block));
@@ -232,7 +232,7 @@ impl EggAssign {
         let new_lhs = if let EVM::BoolVar(_) = self.lhs {
             EVM::BoolVar(BoolVar(format!("bool_rust_{}", name_to_original.len()).into()))
         } else {
-            EVM::BitVar(BitVar(format!("bit256_rust_{}", name_to_original.len()).into()))
+            EVM::BitVar(BitVar(format!("bv256_rust_{}", name_to_original.len()).into()))
         };
         original_to_name.insert((self.lhs.clone(), block), new_lhs.clone());
         name_to_original.insert(new_lhs.clone(), (self.lhs.clone(), block));
@@ -253,6 +253,7 @@ impl EggAssign {
 pub struct Data {
     // A constant for this eclass and the pattern for how it was computed
     constant: Option<(Constant, PatternAst<EVM>, Subst)>,
+    eclass_type: Type
 }
 
 // A map from type to a tuple (enode, cost, type of children)
@@ -302,7 +303,8 @@ impl Analysis<EVM> for TacAnalysis {
         };
 
         Data {
-            constant
+            constant,
+            eclass_type: enode.type_of()
         }
     }
 
@@ -315,8 +317,10 @@ impl Analysis<EVM> for TacAnalysis {
             }
             (None, None) => (),
             (Some(_), None) => (),
-            (Some(a), Some(b)) => assert_eq!(a.0, b.0),
+            (Some(a), Some(b)) => assert_eq!(a.0, b.0, " got different constants with evaluations {} and {}", a.1, b.1),
         }
+
+        assert_eq!(to.eclass_type, from.eclass_type);
 
         DidMerge(merge_a, true)
     }
@@ -343,6 +347,57 @@ impl Analysis<EVM> for TacAnalysis {
             egraph.analysis.important_unions.borrow_mut().push((left, right))
         }
     }
+}
+
+struct TypeCondition {
+    cond_type: Type
+}
+
+impl Condition<EVM, TacAnalysis> for TypeCondition {
+    fn check(&self, egraph: &mut EGraph, eclass: Id, subst: &Subst) -> bool {
+        egraph[eclass].data.eclass_type == self.cond_type
+    }
+}
+
+pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
+    let str_rules = get_pregenerated_rules();
+    let mut res = vec![];
+    for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
+        let lparsed: Pattern<EVM> = lhs.parse().unwrap();
+        let rparsed: Pattern<EVM> = rhs.parse().unwrap();
+
+        // Check the type when the lhs is a variable
+        if lparsed.ast.as_ref().len() == 1 {
+            if let ENodeOrVar::Var(v) = lparsed.ast.as_ref()[0] {
+                let var_type = if v.to_string().starts_with("?bit256") {
+                    Type::Bit256
+                } else if v.to_string().starts_with("?bool") {
+                    Type::Bool
+                } else {
+                    panic!("Rule variables should start with bit256 or bool");
+                };
+                let applier = ConditionalApplier {
+                    condition: TypeCondition { cond_type: var_type },
+                    applier: rparsed
+                };
+                res.push(Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, applier).unwrap());
+            } else {
+                res.push(Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap());
+            }
+        } else {
+            res.push(Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap());
+        }
+    }
+
+    let manual_rules = vec![
+        rewrite!("distr*+"; "(* (+ ?a ?b) ?c)" => "(+ (* ?a ?c) (* ?b ?c))"),
+        rewrite!("doubleneg!=="; "(! (bit== (bit== ?x ?y) 0))" => "(bit== ?x ?y)"),
+    ];
+    for rule in manual_rules {
+        res.push(rule);
+    }
+
+    res
 }
 
 pub struct TacOptimizer {}
@@ -437,7 +492,7 @@ impl TacOptimizer {
                 runner.egraph.rebuild();
                 Ok(())
             });
-        runner = runner.run(&logical_rules());
+        runner = runner.run(&rules());
         log::info!("Done running rules.");
 
         // Find out which variables are equal to each other
@@ -524,11 +579,18 @@ mod tests {
     use super::*;
     use egg::{RecExpr, Symbol};
     use primitive_types::U256;
-    use rust_evm::{eval_evm, WrappedU256, EVM};
+    use rust_evm::{eval_evm, EVM};
 
     fn check_test(input: &str, expected: &str, types: &str) {
         let result = start_optimize(&parse_str(input).unwrap(), &parse_str(types).unwrap());
         assert_eq!(parse_str(expected).unwrap().to_string(), parse_str(&result).unwrap().to_string());
+    }
+
+    #[test]
+    fn eval_equality() {
+        let program_sexp = "((block 0_0_0_0_0_0_0 () ((boolB14 (bit== 3 4)))))";
+
+        check_test(program_sexp, program_sexp, "()");
     }
 
     #[test]
@@ -590,11 +652,9 @@ mod tests {
 
     #[test]
     fn parse_test1() {
-        let from_string: RecExpr<EVM> = "(+ x 0)".to_string().parse().unwrap();
-        let v1 = EVM::Var(Symbol::from("x"));
-        let v2 = EVM::Num(WrappedU256 {
-            value: U256::zero(),
-        });
+        let from_string: RecExpr<EVM> = "(+ bit256x 0)".to_string().parse().unwrap();
+        let v1 = EVM::BitVar(BitVar(Symbol::from("bit256x")));
+        let v2 = EVM::Constant(Constant::Num(U256::zero()));
         let mut foo = RecExpr::default();
         let id1 = foo.add(v1);
         let id2 = foo.add(v2);

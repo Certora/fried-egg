@@ -17,7 +17,7 @@ env_logger = { version = "0.7", default-features = false }
 once_cell = "1.8.0"
 primitive-types = { version = "0.10", default-features = false, features = ["rlp"] }
 rand = "0.8.4"
-rust-evm = { git = "ssh://git@github.com/Certora/rust-evm", rev = "7a25cdf9904f7a5965f8738edd7371440fd0305b" }
+rust-evm = { git = "ssh://git@github.com/Certora/rust-evm", rev = "2ff524eac4e82a3678325d8d80f19af09423e5f4" }
 symbolic_expressions = "5.0.3"
 num = "0.3"
 num-bigint = { version = "0.3", features = ["rand"] }
