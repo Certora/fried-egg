@@ -222,7 +222,7 @@ impl EggAssign {
                     if original_to_names.get(node).is_none() {
                         original_to_names.insert(node.clone(), vec![]);
                     }
-                    original_to_names.get_mut(&node).unwrap().push(new_var);
+                    original_to_names.get_mut(node).unwrap().push(new_var);
                 }
             } else {
                 new_rhs.add(node.clone());
@@ -400,7 +400,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
 }
 
 pub struct TacCost {
-    valid_vars: HashSet<Symbol>
+    obsolete_variables: HashSet<EVM>
 }
 
 impl CostFunction<EVM> for TacCost {
@@ -411,11 +411,11 @@ impl CostFunction<EVM> for TacCost {
         C: FnMut(Id) -> Self::Cost
     {
         let op_cost = match enode {
-            EVM::BitVar(BitVar(v)) | EVM::BoolVar(BoolVar(v)) => {
-                if self.valid_vars.contains(v) {
-                    1
-                } else {
+            EVM::BitVar(_) | EVM::BoolVar(_) => {
+                if self.obsolete_variables.contains(enode) {
                     1000
+                } else {
+                    1
                 }
             }
             _ => 1
@@ -486,6 +486,7 @@ impl TacOptimizer {
 
         // run eqsat with the domain rules
         let variable_roots_clone = variable_roots.clone();
+        let unbound_clone = unbound_variables.clone();
         let mut runner: Runner<EVM, TacAnalysis> = Runner::new(egraph.analysis.clone())
             .with_egraph(egraph)
             .with_iter_limit(params.eqsat_iter_limit)
@@ -496,7 +497,7 @@ impl TacOptimizer {
                 for (_original, names) in &original_to_names {
                     let mut unbound: Vec<EVM> = vec![];
                     let mut ids: Vec<Id> = names.iter().filter_map(|name|
-                        if unbound_variables.contains(name) {
+                        if unbound_clone.contains(name) {
                             unbound.push(name.clone());
                             None
                         } else {
@@ -519,34 +520,22 @@ impl TacOptimizer {
         runner = runner.run(&rules());
         log::info!("Done running rules.");
 
-        // Find out which variables are equal to each other
+        
+        // Extract out interesting equalities
         let mut final_equalities: Vec<EggEquality> = vec![];
-        let mut equal_vars: HashMap<Id, HashSet<EVM>> = Default::default();
-        for (variable, old_eclass) in variable_roots {
-            let eclass = runner.egraph.find(old_eclass);
-            if runner.egraph.analysis.obsolete_variables.contains(&variable) {
-                let old_var = &name_to_original.get(&variable).unwrap().0;
-                if let Some(existing) = equal_vars.get_mut(&eclass) {
-                    existing.insert(old_var.clone());
-                } else {
-                    let mut new_set: HashSet<EVM> = Default::default();
-                    new_set.insert(old_var.clone());
-                    equal_vars.insert(eclass, new_set);
+
+        let extractor = Extractor::new(&runner.egraph, TacCost { obsolete_variables: runner.egraph.analysis.obsolete_variables.clone() });
+        for (variable, old_eclass) in &variable_roots {
+            if !runner.egraph.analysis.obsolete_variables.contains(variable) && !unbound_variables.contains(variable) {
+                let mut expr1 = RecExpr::default();
+                expr1.add(variable.clone());
+                let (cost, extracted) = extractor.find_best(*old_eclass);
+                if cost >= 1000 {
+                    panic!("Cost of extraction over 1000! Likely failed to find something valid.");
                 }
+                final_equalities.push(EggEquality { lhs: expr1, rhs:  extracted }.rename_back(&name_to_original))
             }
         }
-
-        for (_class, vars) in equal_vars {
-            let mut expr1 = RecExpr::default();
-            let mut iter = vars.iter();
-            expr1.add(iter.next().unwrap().clone());
-            for var in iter {
-                let mut expr2 = RecExpr::default();
-                expr2.add(var.clone());
-                final_equalities.push(EggEquality { lhs: expr1.clone(), rhs: expr2 });
-            }
-        }
-
 
         final_equalities
     }
@@ -589,14 +578,25 @@ mod tests {
     // TODO make check_test actually check that we proved them equal to expected
     fn check_test(input: &str, expected: &str) {
         let result = start_optimize(&parse_str(input).unwrap());
-        //assert_eq!(parse_str(expected).unwrap().to_string(), parse_str(&result).unwrap().to_string());
+        let first_list = parse_str(expected).unwrap();
+        let second_list = parse_str(&result).unwrap();
+        if let (Sexp::List(first), Sexp::List(second)) = (first_list, second_list) {
+            let mut vec_strings: Vec<String> = first.iter().map(Sexp::to_string).collect();
+            let mut vec2_strings: Vec<String> = second.iter().map(Sexp::to_string).collect();
+            vec_strings.sort();
+            vec2_strings.sort();
+            assert_eq!(vec_strings, vec2_strings);
+        } else {
+            panic!("expected lists, got {} and {}", result, expected);
+        }
     }
 
     #[test]
     fn eval_equality() {
         let program_sexp = "((block 0_0_0_0_0_0_0 () ((boolB14 (bit== 3 4)))))";
+        let expected = "((boolB14 false))";
 
-        check_test(program_sexp, program_sexp);
+        check_test(program_sexp, expected);
     }
 
     #[test]
@@ -609,11 +609,9 @@ mod tests {
             ))
             )";
         let expected = "(
-            (block block1 () (
-                (bv256R194 64)
-                (bv256R198 96)
-                (bv256R202 32)
-            ))
+            (bv256R194 64)
+            (bv256R198 96)
+            (bv256R202 32)
         )";
         check_test(program_sexp, expected);
     }
@@ -628,11 +626,9 @@ mod tests {
             ))
         )";
         let expected = "(
-            (block block1 () (
-                (bv256x1 (+ bv256x2 96))
-                (bv256x3 (+ bv256x2 64))
-                (bv256x4 64)
-            ))
+            (bv256x1 (+ bv256x2 96))
+            (bv256x3 (+ bv256x2 64))
+            (bv256x4 64)
         )";
         check_test(program_sexp, expected);
     }
@@ -645,10 +641,8 @@ mod tests {
             ))
         )";
         let expected = "(
-            (block block1 () (
-                (bv256R1 64)
-                (bv256R2 32)
-            ))
+            (bv256R1 64)
+            (bv256R2 32)
         )";
         check_test(program_sexp, expected);
     }
@@ -678,16 +672,19 @@ mod tests {
         (block block1 () (
             (bv256a 2)
             (bv256b bv256a)
-            (bv256a (+ bv256a 4))
-            (bv256a (* bv256a 3))
         ))
             (block block2 () (
                 (bv256b bv256a)
-                (bv256b (* 2 (+ bv256b 1)))
-                (bv256b (* 2 bv256b))
+                (bv256c (* 2 (+ bv256b 1)))
+                (bv256d (* 2 bv256c))
             ))
         )";
-        let expected = "((block block1 () ((bv256a 2) (bv256b 2) (bv256a 6) (bv256a 18))) (block block2 () ((bv256b a) (bv256b (+ 2 (+ bv256a bv256a))) (bv256b (* 4 (+ bv256a 1))))))";
+        let expected = "((bv256a 2)
+                               (bv256b 2)
+                               (bv256b 2)
+                                (bv256c 6)
+                                (bv256d 12))
+                                ";
         check_test(program_sexp, expected);
     }
 
@@ -702,12 +699,10 @@ mod tests {
             ))
         )";
         let expected = "(
-            (block block1 () (
                 (bool1 boolunbound)
                 (bv256number1 9)
-                (bool2 (< bv256unbound2 9))
-                (bool3 (|| (< bv256unbound2 9) boolunbound))
-            ))
+                (bool2 (> 9 bv256unbound2))
+                (bool3 (|| boolunbound (> 9 bv256unbound2)))
         )";
         check_test(program_sexp, expected);
     }
@@ -727,16 +722,10 @@ mod tests {
             ))
         )";
         let expected = "(
-            (block block1 () (
                 (bv256a 3)
-            ))
-            (block block2 () (
                 (bv256b 10)
                 (bv256a 3)
-            ))
-            (block block3 (block1 block2) (
                 (bv256z 6)
-            ))
         )";
         check_test(program_sexp, expected);
     }
@@ -744,10 +733,8 @@ mod tests {
     #[test]
     fn bwand() {
         let program_sexp = "((block 387_1018_0_0_0_0_0 () ((bv256R24 (& 4294967295 0)))))";
-        let expected = "((block 387_1018_0_0_0_0_0 () ((bv256R24 0))))";
+        let expected = "((bv256R24 0))";
 
-
-        let types = "((bv256R24 bv256))";
 
         check_test(program_sexp, expected);
     }
@@ -758,13 +745,17 @@ mod tests {
         let program_sexp = "((block 641_1013_0_2_0_18_0 (779_1018_0_2_0_20_0) ((boolB88 (bit== (bitif (|| (> 192 18446744073709551615) (< 192 128)) 1 0) 0))
         (boolB76 (s< bv256R73 64)))
     ) )";
-        check_test(program_sexp, program_sexp)
+        let expected = "((boolB88 true) (boolB76 (s< bv256R73 64)))";
+        check_test(program_sexp, expected)
     }
 
     #[test]
     fn subtract_fold() {
         let program_sexp = "((block 0 (0) ((bv256x (- bv256a 1)) 
         (bv256y (+ bv256a (- 0 1))))))";
-        check_test(program_sexp, program_sexp);
+
+        let expected = "((bv256x (- bv256a 1)) (bv256y (- bv256a 1))))";
+
+        check_test(program_sexp, expected);
     }
 }
