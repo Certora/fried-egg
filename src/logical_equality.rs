@@ -73,6 +73,8 @@ pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
     format!("({} {})", res.0, res.1)
 }
 
+
+// TODO make this sound again by doing the type analysis like in lin_inv
 pub fn logical_rules<A: Analysis<EVM>>() -> Vec<Rewrite<EVM, A>> {
     let str_rules = get_pregenerated_rules();
     let mut res = vec![];
@@ -328,19 +330,17 @@ mod tests {
     fn logical_proves_equal() {
         let queries = vec![
             ("(+ 1 1)", "2"),
-            ("(- a 1)", "(+ a (- 0 1))"),
-            ("(* (- c 1) 32)", "(- (* c 32) 32)"),
-            ("(- (+ a (+ b (* c 32))) (+ a (+ b (* (- c 1) 32))))", "32"),
+            ("(- bv256a 1)", "(+ bv256a (- 0 1))"),
+            ("(* (- bv256c 1) 32)", "(- (* bv256c 32) 32)"),
+            ("(- (+ bv256a (+ bv256b (* bv256c 32))) (+ bv256a (+ bv256b (* (- bv256c 1) 32))))", "32"),
             (
-                "(- (+ a (+ b (* longname 32))) (+ a (+ b (* (- longname 1) 32))))",
+                "(- (+ bv256a (+ bv256b (* bv256longname 32))) (+ bv256a (+ bv256b (* (- bv256longname 1) 32))))",
                 "32",
             ),
             (
                 "(! (== (== 3264763256 tacSighash) 0))",
                 "(== 3264763256 tacSighash)",
             ),
-            // This is a good example of one we can't solve right now
-            // ("(== (! (== certoraOutVar0bv256 0)) 0)", "(== certoraOutVar0bv256 0)"),
         ];
         for (lhs, rhs) in queries {
             let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);

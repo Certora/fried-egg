@@ -2,7 +2,7 @@
 
 Any questions? Oliver's internship is over but he is happy to answer questions (oflatt@gmail.com).
 
-Fried egg is an egraph-based simplifier for TAC programs. The kotlin code converts TAC Commands into a block format that the rust code then parses (`MathOptimization.kt`). The program is represented as a series of blocks with assignments to variables in them (see tests in `lin_inv.rs`). It outputs this same format, but tries to simplify each variable's right hand side value. Right now it is very experimental, and it's not clear if it will actually help simplify the query to Z3 or not.
+Fried egg is an egraph-based optimizer for TAC programs. The kotlin code converts TAC Commands into a block format that the rust code then parses (`MathOptimization.kt`). The program is represented as a series of blocks with assignments to variables in them (see tests in `lin_inv.rs`). It outputs equalities that it learned about the program that are true globally. Right now it is very experimental, and it's not clear if it will actually help Z3 or not.
 
 Fried egg works by first inserting the program into the egraph, running math axioms on the egraph, then extracting the program back out (`TacOptimizer::run`). In an egraph, intermediate variables are inconvenient (they make it hard to extract simpler terms back out), so we avoid them by keeping a side table of which variables correspond to eclasses in the egraph.
 
@@ -12,22 +12,9 @@ See the list of axioms in `ruler-rules.json`.
 
 The first thing the rust code does is make all the variables in each block independent.
 This way, each block can be simplified independently in the e-graph.
-See the first To-do for an important improvement that should be made before this project is merged.
-
-Right now we only support two types: booleans and bv256. On the rust side, these are treated both as bv256. Booleans and bv256 values are separate types on the kotlin side, so we must extract things that will typecheck. To do this, the egraph keeps track of a best expression for both the boolean and bv256 types. We send the types of all variables over to rust so that it knows the types of variables.
-When we get the program back on the kotlin side, we then re-infer what these types should be (the only tricky bit being that constants that are 0 or 1 could be either type).
-
 
 ## To-dos
 
-- All variables in blocks in the egraph are independent. However, if we learn that a variable is the same regardless of the path to a current block, then we can substitute it
-in the block. See `full_program2` for an example. This could be implemented as an egraph "hook" (see `egg` documentation). The hook would check for every variable, if it can be unioned with its instantiations in parent blocks. You also need to modify the kotlin to send predecessor blocks to rust as the second argument to `block`.
-- The regression tests in CI do not pass, there must be some sort of terrible unsoundness bug.
-- The first thing the rust code does is make all the variables in each block independent.
-This way, each block is processed soundly on it's own.
-- We currently use `logical_equality` for small math simplifications, but we should really just send a small program with one expression in it to `lin_inv` instead and delete that file. This will also allow us to send "assumptions", which are really just commands that come before the final expression. 
-- We are missing boolean axioms like `(&& a 1) => a` because we don't distinguish between bools and bv256. However, we could tell which e-classes are boolean-valued using an analysis. We should generate boolean axioms using Ruler and use them, but only when all the variables match boolean e-classes.
-- Errors from the Rust process tend to disappear in CI, and I'm not sure if they show up from staging. Where are they going? See `RustBlaster.kt` for where we call `redirectError`, which redirects the stderr out to the current process.
 - It would be great to support all types of TACExpr so that we can really send the whole program to Rust. That would allow us to do cool things like change the structure of blocks/loop optimizations.
 - It would be cool to do partial evaluation / automatic inlining in the egraph when we simplify things. Though I'm not sure if it's worth the runtime cost.
 Imagine we have a program:
