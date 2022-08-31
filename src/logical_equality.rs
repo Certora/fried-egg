@@ -2,7 +2,7 @@ use egg::{rewrite, Analysis, DidMerge, Id, Language, Pattern, RecExpr, Rewrite, 
 use primitive_types::U256;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use rust_evm::{eval_evm, EVM, Constant};
+use rust_evm::{eval_evm, Constant, EVM};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -73,7 +73,6 @@ pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
     format!("({} {})", res.0, res.1)
 }
 
-
 // TODO make this sound again by doing the type analysis like in lin_inv
 pub fn logical_rules<A: Analysis<EVM>>() -> Vec<Rewrite<EVM, A>> {
     let str_rules = get_pregenerated_rules();
@@ -107,16 +106,27 @@ fn random_256() -> U256 {
     let mut rng = thread_rng();
     let lower = U256::from_dec_str(&rng.gen::<u128>().to_string()).unwrap();
     let dummy_vec: [Id; 2] = [Id::from(0), Id::from(0)];
-    let upper = eval_evm(&EVM::ShiftLeft(dummy_vec), Some(Constant::Num(lower)), Some(Constant::Num(U256::from_dec_str("128").unwrap())), None).unwrap();
+    let upper = eval_evm(
+        &EVM::ShiftLeft(dummy_vec),
+        Some(Constant::Num(lower)),
+        Some(Constant::Num(U256::from_dec_str("128").unwrap())),
+        None,
+    )
+    .unwrap();
     let lower_2 = U256::from_dec_str(&rng.gen::<u128>().to_string()).unwrap();
-    let res = eval_evm(&EVM::BWOr(dummy_vec), Some(Constant::Num(lower_2)), Some(upper), None).unwrap();
+    let res = eval_evm(
+        &EVM::BWOr(dummy_vec),
+        Some(Constant::Num(lower_2)),
+        Some(upper),
+        None,
+    )
+    .unwrap();
     if let Constant::Num(n) = res {
-        return n
+        n
     } else {
         panic!("Got a boolean from evaluation of BWOr which is quite a bad bug I have to say")
     }
 }
-
 
 const CVEC_LEN: usize = 30;
 
@@ -162,10 +172,10 @@ impl Analysis<EVM> for LogicalAnalysis {
                     let mut child_const = vec![];
                     enode.for_each(|child| child_const.push(&egraph[child].data.cvec));
                     for i in 0..CVEC_LEN {
-                        let first = child_const.get(0).map(|v| v.get(i).unwrap().clone());
-                        let second = child_const.get(1).map(|v| v.get(i).unwrap().clone());
+                        let first = child_const.get(0).map(|v| *v.get(i).unwrap());
+                        let second = child_const.get(1).map(|v| *v.get(i).unwrap());
 
-                        let third = child_const.get(2).map(|v| v.get(i).unwrap().clone());
+                        let third = child_const.get(2).map(|v| *v.get(i).unwrap());
 
                         let res = eval_evm(enode, first, second, third);
                         if res.is_none() {

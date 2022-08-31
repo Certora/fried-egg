@@ -1,20 +1,13 @@
 use clap::Parser;
 use egg::*;
 use serde::*;
-use std::io;
-use std::io::prelude::*;
 use std::cell::RefCell;
 // use statement::Stmt;
-use egg::{ENodeOrVar, Pattern, RecExpr, Justification};
-use itertools::Itertools;
-use num_bigint::BigUint;
-use primitive_types::U256;
-use rust_evm::{BoolVar, BitVar, Constant, eval_evm, EVM, Type};
-use std::iter::FromIterator;
+use egg::{ENodeOrVar, Justification, Pattern, RecExpr};
+use rust_evm::{eval_evm, BitVar, BoolVar, Constant, Type, EVM};
 use std::{cmp::*, collections::HashMap, collections::HashSet};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
-use indexmap::IndexSet;
 
 use crate::logical_equality::get_pregenerated_rules;
 
@@ -62,43 +55,30 @@ impl EggBlock {
     pub fn from_sexp(expr: &Sexp) -> EggBlock {
         match expr {
             Sexp::List(contents) => match &contents[..] {
-                [Sexp::String(block_string), Sexp::String(id), Sexp::List(predecessors), Sexp::List(assignments)] => {
+                [Sexp::String(block_string), Sexp::String(id), Sexp::List(predecessors), Sexp::List(assignments)] =>
+                {
                     if block_string != "block" {
                         panic!("Expected keyword block, got {}", block_string);
                     }
                     EggBlock {
                         id: id.into(),
-                        predecessors: predecessors.iter().map(|parent| {
-                            if let Sexp::String(pred) = parent {
-                                pred.into()
-                            } else {
-                                panic!("Expected string for block parent, got {}", parent)
-                            }
-                        }).collect(),
-                        assignments: assignments
-                            .into_iter()
-                            .map(|pair| EggAssign::from_sexp(pair))
+                        predecessors: predecessors
+                            .iter()
+                            .map(|parent| {
+                                if let Sexp::String(pred) = parent {
+                                    pred.into()
+                                } else {
+                                    panic!("Expected string for block parent, got {}", parent)
+                                }
+                            })
                             .collect(),
+                        assignments: assignments.iter().map(EggAssign::from_sexp).collect(),
                     }
-                },
+                }
                 _ => panic!("Expected a block, got: {}", expr),
             },
             _ => panic!("Expected an id and expressions for a block, got: {}", expr),
         }
-    }
-
-    pub fn to_sexp(&self) -> Sexp {
-        Sexp::List(vec![
-            Sexp::String("block".to_string()),
-            Sexp::String(self.id.to_string()),
-            Sexp::List(self.predecessors.iter().map(|id| Sexp::String(id.to_string())).collect()),
-            Sexp::List(
-                self.assignments
-                    .iter()
-                    .map(|assign| assign.to_sexp())
-                    .collect(),
-            ),
-        ])
     }
 
     // Rename all the variables to unique names to avoid clashing with other blocks
@@ -146,11 +126,11 @@ impl EggEquality {
         ])
     }
 
-    fn rename_recexpr(recexpr: &RecExpr<EVM>, name_to_original: &NameToOriginal) -> RecExpr<EVM>{
+    fn rename_recexpr(recexpr: &RecExpr<EVM>, name_to_original: &NameToOriginal) -> RecExpr<EVM> {
         let mut old_recexpr: RecExpr<EVM> = Default::default();
         for node in recexpr.as_ref() {
             if let EVM::BoolVar(_) | EVM::BitVar(_) = node {
-                let old_var = &name_to_original.get(&node).unwrap().0;
+                let old_var = &name_to_original.get(node).unwrap().0;
                 old_recexpr.add(old_var.clone());
             } else {
                 old_recexpr.add(node.clone());
@@ -190,13 +170,6 @@ impl EggAssign {
         }
     }
 
-    pub fn to_sexp(&self) -> Sexp {
-        Sexp::List(vec![
-            Sexp::String(self.lhs.to_string()),
-            parse_str(&self.rhs.to_string()).unwrap(),
-        ])
-    }
-
     pub fn rename_variables(
         &self,
         block: BlockId,
@@ -211,9 +184,13 @@ impl EggAssign {
                     new_rhs.add(existing.clone());
                 } else {
                     let new_var = if let EVM::BoolVar(_) = node {
-                        EVM::BoolVar(BoolVar(format!("bool_rust_{}", name_to_original.len()).into()))
+                        EVM::BoolVar(BoolVar(
+                            format!("bool_rust_{}", name_to_original.len()).into(),
+                        ))
                     } else {
-                        EVM::BitVar(BitVar(format!("bv256_rust_{}", name_to_original.len()).into()))
+                        EVM::BitVar(BitVar(
+                            format!("bv256_rust_{}", name_to_original.len()).into(),
+                        ))
                     };
                     original_to_name.insert((node.clone(), block), new_var.clone());
                     name_to_original.insert(new_var.clone(), (node.clone(), block));
@@ -230,17 +207,24 @@ impl EggAssign {
         }
 
         let new_lhs = if let EVM::BoolVar(_) = self.lhs {
-            EVM::BoolVar(BoolVar(format!("bool_rust_{}", name_to_original.len()).into()))
+            EVM::BoolVar(BoolVar(
+                format!("bool_rust_{}", name_to_original.len()).into(),
+            ))
         } else {
-            EVM::BitVar(BitVar(format!("bv256_rust_{}", name_to_original.len()).into()))
+            EVM::BitVar(BitVar(
+                format!("bv256_rust_{}", name_to_original.len()).into(),
+            ))
         };
         original_to_name.insert((self.lhs.clone(), block), new_lhs.clone());
         name_to_original.insert(new_lhs.clone(), (self.lhs.clone(), block));
-        
+
         if original_to_names.get(&self.lhs).is_none() {
             original_to_names.insert(self.lhs.clone(), vec![]);
         }
-        original_to_names.get_mut(&self.lhs).unwrap().push(new_lhs.clone());
+        original_to_names
+            .get_mut(&self.lhs)
+            .unwrap()
+            .push(new_lhs.clone());
 
         EggAssign {
             lhs: new_lhs,
@@ -253,12 +237,8 @@ impl EggAssign {
 pub struct Data {
     // A constant for this eclass and the pattern for how it was computed
     constant: Option<(Constant, PatternAst<EVM>, Subst)>,
-    eclass_type: Type
+    eclass_type: Type,
 }
-
-// A map from type to a tuple (enode, cost, type of children)
-// The type of the children is used to extract back out the best program
-type BestForType = HashMap<Symbol, (EVM, BigUint, Symbol)>;
 
 #[derive(Debug, Clone)]
 pub struct TacAnalysis {
@@ -268,7 +248,7 @@ pub struct TacAnalysis {
     pub obsolete_variables: HashSet<EVM>,
 
     // A set of unions that actually did anything (unioned two eclasses)
-    pub important_unions: RefCell<Vec<(Id, Id)>>
+    pub important_unions: RefCell<Vec<(Id, Id)>>,
 }
 
 impl Analysis<EVM> for TacAnalysis {
@@ -303,7 +283,7 @@ impl Analysis<EVM> for TacAnalysis {
 
         Data {
             constant,
-            eclass_type: enode.type_of()
+            eclass_type: enode.type_of(),
         }
     }
 
@@ -316,7 +296,11 @@ impl Analysis<EVM> for TacAnalysis {
             }
             (None, None) => (),
             (Some(_), None) => (),
-            (Some(a), Some(b)) => assert_eq!(a.0, b.0, " got different constants with evaluations {} and {}", a.1, b.1),
+            (Some(a), Some(b)) => assert_eq!(
+                a.0, b.0,
+                " got different constants with evaluations {} and {}",
+                a.1, b.1
+            ),
         }
 
         assert_eq!(to.eclass_type, from.eclass_type);
@@ -342,18 +326,22 @@ impl Analysis<EVM> for TacAnalysis {
     }
 
     fn pre_union(egraph: &EGraph, left: Id, right: Id, _reason: &Option<Justification>) {
-        if (egraph.find(left) != egraph.find(right)) {
-            egraph.analysis.important_unions.borrow_mut().push((left, right))
+        if egraph.find(left) != egraph.find(right) {
+            egraph
+                .analysis
+                .important_unions
+                .borrow_mut()
+                .push((left, right))
         }
     }
 }
 
 struct TypeCondition {
-    cond_type: Type
+    cond_type: Type,
 }
 
 impl Condition<EVM, TacAnalysis> for TypeCondition {
-    fn check(&self, egraph: &mut EGraph, eclass: Id, subst: &Subst) -> bool {
+    fn check(&self, egraph: &mut EGraph, eclass: Id, _subst: &Subst) -> bool {
         egraph[eclass].data.eclass_type == self.cond_type
     }
 }
@@ -376,15 +364,23 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
                     panic!("Rule variables should start with bv256 or bool");
                 };
                 let applier = ConditionalApplier {
-                    condition: TypeCondition { cond_type: var_type },
-                    applier: rparsed
+                    condition: TypeCondition {
+                        cond_type: var_type,
+                    },
+                    applier: rparsed,
                 };
-                res.push(Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, applier).unwrap());
+                res.push(
+                    Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, applier).unwrap(),
+                );
             } else {
-                res.push(Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap());
+                res.push(
+                    Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap(),
+                );
             }
         } else {
-            res.push(Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap());
+            res.push(
+                Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap(),
+            );
         }
     }
 
@@ -400,7 +396,7 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
 }
 
 pub struct TacCost {
-    obsolete_variables: HashSet<EVM>
+    obsolete_variables: HashSet<EVM>,
 }
 
 impl CostFunction<EVM> for TacCost {
@@ -408,7 +404,7 @@ impl CostFunction<EVM> for TacCost {
 
     fn cost<C>(&mut self, enode: &EVM, mut costs: C) -> Self::Cost
     where
-        C: FnMut(Id) -> Self::Cost
+        C: FnMut(Id) -> Self::Cost,
     {
         let op_cost = match enode {
             EVM::BitVar(_) | EVM::BoolVar(_) => {
@@ -418,7 +414,7 @@ impl CostFunction<EVM> for TacCost {
                     1
                 }
             }
-            _ => 1
+            _ => 1,
         };
 
         enode.fold(op_cost, |sum, id| sum + costs(id))
@@ -439,7 +435,13 @@ impl TacOptimizer {
         // Rename all the blocks so they are independent
         let renamed_blocks: Vec<EggBlock> = blocks
             .iter()
-            .map(|block| block.rename_variables(&mut name_to_original, &mut original_to_name, &mut original_to_names))
+            .map(|block| {
+                block.rename_variables(
+                    &mut name_to_original,
+                    &mut original_to_name,
+                    &mut original_to_names,
+                )
+            })
             .collect();
 
         let analysis = TacAnalysis {
@@ -449,7 +451,6 @@ impl TacOptimizer {
         };
         // Set up the egraph with fresh analysis
         let mut egraph = EGraph::new(analysis).with_explanations_enabled();
-        
 
         // Add all the blocks to the egraph, keeping track of the eclasses for each variable
         let mut variable_roots: HashMap<EVM, Id> = Default::default();
@@ -494,23 +495,33 @@ impl TacOptimizer {
             .with_scheduler(egg::SimpleScheduler)
             // When we prove all instances of a variable are the same, get rid of intermediate renamings
             .with_hook(move |runner| {
-                for (_original, names) in &original_to_names {
+                for names in original_to_names.values() {
                     let mut unbound: Vec<EVM> = vec![];
-                    let mut ids: Vec<Id> = names.iter().filter_map(|name|
-                        if unbound_clone.contains(name) {
-                            unbound.push(name.clone());
-                            None
-                        } else {
-                            Some(runner.egraph.find(*variable_roots_clone.get(name).unwrap()))
-                        }
-                    )
+                    let mut ids: Vec<Id> = names
+                        .iter()
+                        .filter_map(|name| {
+                            if unbound_clone.contains(name) {
+                                unbound.push(name.clone());
+                                None
+                            } else {
+                                Some(runner.egraph.find(*variable_roots_clone.get(name).unwrap()))
+                            }
+                        })
                         .collect();
                     ids.dedup();
 
                     if ids.len() == 1 {
                         for intermediate in unbound {
-                            runner.egraph.union_trusted(*variable_roots_clone.get(&intermediate).unwrap(), ids[0], "intermediateequal");
-                            runner.egraph.analysis.obsolete_variables.insert(intermediate);
+                            runner.egraph.union_trusted(
+                                *variable_roots_clone.get(&intermediate).unwrap(),
+                                ids[0],
+                                "intermediateequal",
+                            );
+                            runner
+                                .egraph
+                                .analysis
+                                .obsolete_variables
+                                .insert(intermediate);
                         }
                     }
                 }
@@ -520,20 +531,32 @@ impl TacOptimizer {
         runner = runner.run(&rules());
         log::info!("Done running rules.");
 
-        
         // Extract out interesting equalities
         let mut final_equalities: Vec<EggEquality> = vec![];
 
-        let extractor = Extractor::new(&runner.egraph, TacCost { obsolete_variables: runner.egraph.analysis.obsolete_variables.clone() });
+        let extractor = Extractor::new(
+            &runner.egraph,
+            TacCost {
+                obsolete_variables: runner.egraph.analysis.obsolete_variables.clone(),
+            },
+        );
         for (variable, old_eclass) in &variable_roots {
-            if !runner.egraph.analysis.obsolete_variables.contains(variable) && !unbound_variables.contains(variable) {
+            if !runner.egraph.analysis.obsolete_variables.contains(variable)
+                && !unbound_variables.contains(variable)
+            {
                 let mut expr1 = RecExpr::default();
                 expr1.add(variable.clone());
                 let (cost, extracted) = extractor.find_best(*old_eclass);
                 if cost >= 1000 {
                     panic!("Cost of extraction over 1000! Likely failed to find something valid.");
                 }
-                final_equalities.push(EggEquality { lhs: expr1, rhs:  extracted }.rename_back(&name_to_original))
+                final_equalities.push(
+                    EggEquality {
+                        lhs: expr1,
+                        rhs: extracted,
+                    }
+                    .rename_back(&name_to_original),
+                )
             }
         }
 
@@ -552,8 +575,8 @@ pub fn start_optimize(blocks_in: &Sexp) -> String {
     let mut blocks: Vec<EggBlock> = vec![];
 
     if let Sexp::List(list) = blocks_in {
-        for block in list.into_iter() {
-            blocks.push(EggBlock::from_sexp(&block));
+        for block in list {
+            blocks.push(EggBlock::from_sexp(block));
         }
     } else {
         panic!("Expected a list of blocks");
@@ -573,7 +596,6 @@ mod tests {
     use egg::{RecExpr, Symbol};
     use primitive_types::U256;
     use rust_evm::{eval_evm, EVM};
-
 
     // TODO make check_test actually check that we proved them equal to expected
     fn check_test(input: &str, expected: &str) {
@@ -735,10 +757,8 @@ mod tests {
         let program_sexp = "((block 387_1018_0_0_0_0_0 () ((bv256R24 (& 4294967295 0)))))";
         let expected = "((bv256R24 0))";
 
-
         check_test(program_sexp, expected);
     }
-
 
     #[test]
     fn boolean_fold() {
