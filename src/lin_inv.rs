@@ -5,7 +5,7 @@ use std::cell::RefCell;
 // use statement::Stmt;
 use egg::{ENodeOrVar, Justification, Pattern, RecExpr};
 use rust_evm::{eval_evm, BitVar, BoolVar, Constant, Type, EVM};
-use std::{cmp::*, collections::HashMap, collections::HashSet};
+use std::{cmp::*, collections::HashMap, collections::HashSet, time::Duration};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
@@ -15,15 +15,6 @@ pub type EGraph = egg::EGraph<EVM, TacAnalysis>;
 type NameToOriginal = HashMap<EVM, (EVM, BlockId)>;
 type OriginalToName = HashMap<(EVM, BlockId), EVM>;
 type OriginalToNames = HashMap<EVM, Vec<EVM>>;
-
-// NOTE: this should be "freshness" perhaps. Oldest vars have least age.
-//
-#[derive(Parser)]
-#[clap(rename_all = "kebab-case")]
-pub enum Command {
-    // only one command for now
-    Optimize(OptParams),
-}
 
 #[derive(Serialize, Deserialize, Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -36,7 +27,21 @@ impl Default for OptParams {
     fn default() -> Self {
         Self {
             eqsat_iter_limit: 3,
-            eqsat_node_limit: 50_000,
+            eqsat_node_limit: 100_000,
+        }
+    }
+}
+
+impl OptParams {
+    fn from_sexp(sexp: &Sexp) -> OptParams {
+        if let Sexp::List(args) = sexp {
+            assert!(args.len() == 1);
+            OptParams {
+                eqsat_iter_limit: args[0].to_string().parse().unwrap(),
+                eqsat_node_limit: 100_000,
+            }
+        } else {
+            panic!("Expected list of args for optparams. Got: {}", sexp);
         }
     }
 }
@@ -492,6 +497,7 @@ impl TacOptimizer {
             .with_egraph(egraph)
             .with_iter_limit(params.eqsat_iter_limit)
             .with_node_limit(params.eqsat_node_limit)
+            .with_time_limit(Duration::from_secs(u64::MAX))
             .with_scheduler(egg::SimpleScheduler)
             // When we prove all instances of a variable are the same, get rid of intermediate renamings
             .with_hook(move |runner| {
@@ -564,14 +570,15 @@ impl TacOptimizer {
     }
 }
 
-fn start_blocks(blocks: Vec<EggBlock>) -> Vec<EggEquality> {
-    let params: OptParams = OptParams::default();
-    TacOptimizer {}.run(params, blocks)
+fn start_blocks(blocks: Vec<EggBlock>, config: OptParams) -> Vec<EggEquality> {
+    TacOptimizer {}.run(config, blocks)
 }
+
 
 // Entry point- parse Sexp and run optimization
 // We expect all the blocks to be DSA
-pub fn start_optimize(blocks_in: &Sexp) -> String {
+pub fn start_optimize(config: &Sexp, blocks_in: &Sexp) -> String {
+    let config = OptParams::from_sexp(config);
     let mut blocks: Vec<EggBlock> = vec![];
 
     if let Sexp::List(list) = blocks_in {
@@ -582,7 +589,7 @@ pub fn start_optimize(blocks_in: &Sexp) -> String {
         panic!("Expected a list of blocks");
     }
 
-    let blocks_list = start_blocks(blocks)
+    let blocks_list = start_blocks(blocks, config)
         .iter()
         .map(|equality| equality.to_sexp())
         .collect();
@@ -599,7 +606,7 @@ mod tests {
 
     // TODO make check_test actually check that we proved them equal to expected
     fn check_test(input: &str, expected: &str) {
-        let result = start_optimize(&parse_str(input).unwrap());
+        let result = start_optimize(&parse_str("(3)").unwrap(), &parse_str(input).unwrap());
         let first_list = parse_str(expected).unwrap();
         let second_list = parse_str(&result).unwrap();
         if let (Sexp::List(first), Sexp::List(second)) = (first_list, second_list) {
