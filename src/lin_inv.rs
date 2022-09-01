@@ -35,10 +35,10 @@ impl Default for OptParams {
 impl OptParams {
     fn from_sexp(sexp: &Sexp) -> OptParams {
         if let Sexp::List(args) = sexp {
-            assert!(args.len() == 1);
+            assert!(args.len() == 2);
             OptParams {
                 eqsat_iter_limit: args[0].to_string().parse().unwrap(),
-                eqsat_node_limit: 100_000,
+                eqsat_node_limit: args[1].to_string().parse().unwrap(),
             }
         } else {
             panic!("Expected list of args for optparams. Got: {}", sexp);
@@ -535,7 +535,7 @@ impl TacOptimizer {
                 Ok(())
             });
         runner = runner.run(&rules());
-        log::info!("Done running rules.");
+        //eprintln!("STOP REASON {:?}", runner.stop_reason);
 
         // Extract out interesting equalities
         let mut final_equalities: Vec<EggEquality> = vec![];
