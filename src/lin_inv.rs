@@ -238,11 +238,21 @@ impl EggAssign {
     }
 }
 
+pub trait TypeData {
+    fn get_type(&self) -> Type;
+}
+
 #[derive(Debug, Clone)]
 pub struct Data {
     // A constant for this eclass and the pattern for how it was computed
     constant: Option<(Constant, PatternAst<EVM>, Subst)>,
     eclass_type: Type,
+}
+
+impl TypeData for Data {
+    fn get_type(&self) -> Type {
+        self.eclass_type.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -341,17 +351,7 @@ impl Analysis<EVM> for TacAnalysis {
     }
 }
 
-struct TypeCondition {
-    cond_type: Type,
-}
-
-impl Condition<EVM, TacAnalysis> for TypeCondition {
-    fn check(&self, egraph: &mut EGraph, eclass: Id, _subst: &Subst) -> bool {
-        egraph[eclass].data.eclass_type == self.cond_type
-    }
-}
-
-pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
+pub fn rules<D: TypeData, A: Analysis<EVM, Data = D>>() -> Vec<Rewrite<EVM, A>> {
     let str_rules = get_pregenerated_rules();
     let mut res = vec![];
     for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
@@ -368,24 +368,19 @@ pub fn rules() -> Vec<Rewrite<EVM, TacAnalysis>> {
                 } else {
                     panic!("Rule variables should start with bv256 or bool");
                 };
+                let condition = move |egraph: &mut egg::EGraph<EVM, A>, id: Id, _subst: &Subst| {
+                    egraph[id].data.get_type() == var_type
+                };
                 let applier = ConditionalApplier {
-                    condition: TypeCondition {
-                        cond_type: var_type,
-                    },
+                    condition,
                     applier: rparsed,
                 };
-                res.push(
-                    Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, applier).unwrap(),
-                );
+                res.push(Rewrite::<EVM, A>::new(index.to_string(), lparsed, applier).unwrap());
             } else {
-                res.push(
-                    Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap(),
-                );
+                res.push(Rewrite::<EVM, A>::new(index.to_string(), lparsed, rparsed).unwrap());
             }
         } else {
-            res.push(
-                Rewrite::<EVM, TacAnalysis>::new(index.to_string(), lparsed, rparsed).unwrap(),
-            );
+            res.push(Rewrite::<EVM, A>::new(index.to_string(), lparsed, rparsed).unwrap());
         }
     }
 
@@ -574,7 +569,6 @@ fn start_blocks(blocks: Vec<EggBlock>, config: OptParams) -> Vec<EggEquality> {
     TacOptimizer {}.run(config, blocks)
 }
 
-
 // Entry point- parse Sexp and run optimization
 // We expect all the blocks to be DSA
 pub fn start_optimize(config: &Sexp, blocks_in: &Sexp) -> String {
@@ -606,7 +600,10 @@ mod tests {
 
     // TODO make check_test actually check that we proved them equal to expected
     fn check_test(input: &str, expected: &str) {
-        let result = start_optimize(&parse_str("(3)").unwrap(), &parse_str(input).unwrap());
+        let result = start_optimize(
+            &parse_str("(3 10000000)").unwrap(),
+            &parse_str(input).unwrap(),
+        );
         let first_list = parse_str(expected).unwrap();
         let second_list = parse_str(&result).unwrap();
         if let (Sexp::List(first), Sexp::List(second)) = (first_list, second_list) {

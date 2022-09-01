@@ -1,8 +1,9 @@
-use egg::{rewrite, Analysis, DidMerge, Id, Language, Pattern, RecExpr, Rewrite, Runner};
+use crate::lin_inv::{rules, TypeData};
+use egg::{Analysis, DidMerge, Id, Language, RecExpr, Runner};
 use primitive_types::U256;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use rust_evm::{eval_evm, Constant, EVM};
+use rust_evm::{eval_evm, Constant, Type, EVM};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -73,33 +74,19 @@ pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
     format!("({} {})", res.0, res.1)
 }
 
-// TODO make this sound again by doing the type analysis like in lin_inv
-pub fn logical_rules<A: Analysis<EVM>>() -> Vec<Rewrite<EVM, A>> {
-    let str_rules = get_pregenerated_rules();
-    let mut res = vec![];
-    for (index, (lhs, rhs)) in str_rules.into_iter().enumerate() {
-        let lparsed: Pattern<EVM> = lhs.parse().unwrap();
-        let rparsed: Pattern<EVM> = rhs.parse().unwrap();
-        res.push(Rewrite::<EVM, A>::new(index.to_string(), lparsed, rparsed).unwrap());
-    }
-
-    let manual_rules = vec![
-        rewrite!("distr*+"; "(* (+ ?a ?b) ?c)" => "(+ (* ?a ?c) (* ?b ?c))"),
-        rewrite!("doubleneg!=="; "(! (bit== (bit== ?x ?y) 0))" => "(bit== ?x ?y)"),
-    ];
-    for rule in manual_rules {
-        res.push(rule);
-    }
-
-    res
-}
-
 type EGraph = egg::EGraph<EVM, LogicalAnalysis>;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Data {
     cvec: Vec<Constant>,
     constant: Option<Constant>,
+    eclass_type: Type,
+}
+
+impl TypeData for Data {
+    fn get_type(&self) -> Type {
+        self.eclass_type.clone()
+    }
 }
 
 fn random_256() -> U256 {
@@ -201,7 +188,11 @@ impl Analysis<EVM> for LogicalAnalysis {
         let third = child_const.get(2).unwrap_or(&None);
         let constant = eval_evm(enode, *first, *second, *third);
 
-        Data { cvec, constant }
+        Data {
+            cvec,
+            constant,
+            eclass_type: enode.type_of(),
+        }
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
@@ -327,7 +318,7 @@ impl LogicalRunner {
                 }
             });
 
-        runner = runner.run(&logical_rules());
+        runner = runner.run(&rules());
         self.egraph = runner.egraph;
     }
 }
@@ -348,8 +339,8 @@ mod tests {
                 "32",
             ),
             (
-                "(! (== (== 3264763256 tacSighash) 0))",
-                "(== 3264763256 tacSighash)",
+                "(! (bool== (bit== 3264763256 bv256tacSighash) false))",
+                "(bit== 3264763256 bv256tacSighash)",
             ),
         ];
         for (lhs, rhs) in queries {
