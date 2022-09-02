@@ -16,16 +16,21 @@ See the list of axioms in `ruler-rules.json`.
 
 ## Tricks to try
 
+- Rule scheduling! Maybe try 2 and a half iters by making rules fire less after iter 2? Or just run some of the rules?
 - Different extraction functions with different costs
 - Extracting multiple things per eclass
 - Extracting one thing per enode in the eclass
 - Different time or iter limits to egg
-- New rulesets- iter 2 ruleset instead of iter 2 ruleset from ruler-evm?
+- New rulesets- iter 2 ruleset instead of iter 2 ruleset from ruler-evm
 
 ## To-dos
 
-- It would be great to support all types of TACExpr so that we can really send the whole program to Rust. That would allow us to do cool things like change the structure of blocks/loop optimizations.
-- Fix up LogicalEquivalence, which is currently disabled. You need to add a type analysis to the logical_eq stuff so the rules are sound.
+- LogicalEquivalence is currently disabled because of an error from typechecking expressions. I believe that `InfeasiblePathAnalysis` is passing in some bad tacexpr or something to logicalequivalence. Thomas knows something about this too.
+- Iter 3 is resulting in really good speedups for large queries, but also new solver UNKOWN results for some benchmarks. We need to figure out why the solver gets confused and returns unknown for these. Iter 2 seems to not result in these problems.
+
+## Future projects
+
+- It would be great to support all types of TACExpr so that we can send the whole program to Rust. That would allow us to do cool things like change the structure of blocks/loop optimizations.
 - It would be cool to do partial evaluation / automatic inlining in the egraph when we simplify things. Though I'm not sure if it's worth the runtime cost.
 Imagine we have a program:
 ```
@@ -39,9 +44,7 @@ If we try inlining block1 and block2, we find that in both cases y = 0. But we w
 
 
 
-## Future project: Adapting to perform linear invariant inference
-
-We would like to replace `PointerSimplification.kt` with fried-egg, since it could be much faster and find better simplifications.
+- We would like to replace `PointerSimplification.kt` with fried-egg, since it could be much faster and find better simplifications.
 The challenge is to not replace assignments that need to maintain a particular shape for other analysis.
 In particular, byte array length computations are a problem. There is code that finds these computations in `AllocationAnalysis.kt`, but the PointerSimplification code does it's own ad-hoc thing using the invariants it found.
 
