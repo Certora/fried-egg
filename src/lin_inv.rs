@@ -782,4 +782,40 @@ mod tests {
 
         check_test(program_sexp, expected);
     }
+
+    fn complicated_stuff() {
+        let program_sexp = "(3 1000000000) ((block 0_0_0_0_0_0_0 () ((bv256R0 bv256egg_var_0) (bv256R1 bv256egg_var_1) (bv256e343.msg.sender bv256egg_var_2)\
+        (bv256e343.block.coinbase bv256egg_var_3) (bv256e343.msg.value bv256egg_var_4) (bv256e343.msg.address bv256egg_var_5)\
+        (bv256R4 bv256egg_var_6) (bv256R5 bv256egg_var_7) (bv256R6 bv256egg_var_8) (bv256R8 bv256egg_var_9) (bv256tacCalldatabuf!0@6 bv256egg_var_10)\
+        (bv256R9 bv256egg_var_11) (bv256R10 bv256egg_var_12) (bv256tacCalldatabuf!0@7 bv256egg_var_13) (bv256R11 bv256egg_var_14) (bv256R12 bv256egg_var_15)\
+        (bv256R13 bv256egg_var_16) (bv256R14 bv256egg_var_17) (bv256R15 bv256egg_var_18) (bv256R17 bv256egg_var_19) (bv256tacCalldatabuf!0@9 bv256egg_var_20)\
+        (bv256R18 bv256egg_var_21) (bv256R19 bv256egg_var_22) (bv256tacCalldatabuf!0@10 bv256egg_var_23) (bv256R20 bv256egg_var_24) (bv256R21 bv256egg_var_25)\
+        (bv256R22 bv256egg_var_26) (bv256R23 bv256egg_var_27) (bv256R25 bv256egg_var_28) (bv256tacCalldatabuf!0@12 bv256egg_var_29) (bv256R26 bv256egg_var_30)\
+        (bv256R27 bv256egg_var_31) (bv256tacCalldatabuf!0@13 bv256egg_var_32) (bv256R28 bv256egg_var_33) (boolB33 boolegg_var_34) (boolB34 boolegg_var_35) (boolB35 boolegg_var_36)\
+        (bv256R36 bv256egg_var_37) (bv256R38 bv256egg_var_38) (bv256R40 bv256egg_var_39) (bv256R42 bv256egg_var_40) (bv256R44 bv256egg_var_41) (bv256R46 bv256egg_var_42)\
+        (bv256R48 bv256egg_var_43) (bv256R50 bv256egg_var_44) (bv256R52 bv256egg_var_45) (bv256R54 bv256egg_var_46) (bv256R56 bv256egg_var_47) (bv256R58 bv256egg_var_48)\
+        (bv256R60 bv256egg_var_49) (bv256R62 bv256egg_var_50) (bv256R64 bv256egg_var_51) (bv256R66 bv256egg_var_52) (bv256R68 bv256egg_var_53) (bv256R70 bv256egg_var_54)\
+        (bv256R72 bv256egg_var_55) (bv256R74 bv256egg_var_56) (bv256R76 bv256egg_var_57) (bv256R78 bv256egg_var_58))) (block 0_0_0_5_0_17_0 (0_0_0_0_0_0_0) ((bv256R95 bv256egg_var_59)\
+        (bv256R107 128) (bv256R108 bv256egg_var_60) (bv256R110 bv256egg_var_61))) (block 0_0_0_6_0_25_0 (0_0_0_5_0_17_0) ((bv256R114 bv256egg_var_62)\
+        (bv256R122 (& 1461501637330902918203684832716283019655932542975 bv256R0)))) (block 1_0_0_5_0_26_0 (0_0_0_6_0_25_0) ((bv256R125 bv256egg_var_63)\
+        (bv256R126 (& 1461501637330902918203684832716283019655932542975 bv256R125)) (bv256R128 128) (bv256R129 bv256egg_var_64) (bv256R131 bv256egg_var_65)))\
+        (block 0_0_0_7_0_27_0 (1_0_0_5_0_26_0) ((bv256R135 bv256egg_var_66))) (block 2_0_0_5_0_28_0 (0_0_0_7_0_27_0) ((bv256R145 bv256egg_var_67) (bv256tacRetval0@5 bv256R145)))\
+        (block 12_0_0_0_0_0_0 (2_0_0_5_0_28_0) ((bv256val_x_orig354 bv256tacRetval0@5) (bv256tacTmp357 bv256val_x_orig354) (bv256tacTmp358 0) (boolcertoraAssume356 (bit== bv256tacTmp357 0))))\
+        (block 0_0_0_8_0_29_0 (12_0_0_0_0_0_0) ((bv256R155 bv256egg_var_68) (bv256R168 128) (bv256R169 bv256egg_var_69) (bv256R171 bv256egg_var_70))) (block 0_0_0_9_0_36_0 (0_0_0_8_0_29_0)\
+        ((bv256R175 bv256egg_var_71) (bv256R183 (& 1461501637330902918203684832716283019655932542975 bv256R0)))) (block 3_0_0_8_0_37_0 (0_0_0_9_0_36_0) ((bv256R185 bv256egg_var_72)\
+        (bv256R186 (& 1461501637330902918203684832716283019655932542975 bv256R185)) (bv256R188 128) (bv256R189 bv256egg_var_73) (bv256R191 bv256egg_var_74)))\
+        (block 0_0_0_10_0_38_0 (3_0_0_8_0_37_0) ((bv256R195 bv256egg_var_75) (bv256R204 (+ bv256R12 1)) (bv256R205 (+ bv256R12 1))))\
+        (block 4_0_0_8_0_39_0 (0_0_0_10_0_38_0) ()) (block 26_0_0_0_0_0_0 (4_0_0_8_0_39_0) ())\
+        (block 0_0_0_11_0_40_0 (26_0_0_0_0_0_0) ((bv256R213 bv256egg_var_76) (bv256R225 128)\
+        (bv256R226 bv256egg_var_77) (bv256R228 bv256egg_var_78))) (block 0_0_0_12_0_48_0 (0_0_0_11_0_40_0)\
+        ((bv256R232 bv256egg_var_79) (bv256R240 (& 1461501637330902918203684832716283019655932542975 bv256R0))))\
+        (block 1_0_0_11_0_49_0 (0_0_0_12_0_48_0) ((bv256R243 bv256egg_var_80) (bv256R244 (& 1461501637330902918203684832716283019655932542975 bv256R243))\
+        (bv256R246 128) (bv256R247 bv256egg_var_81) (bv256R249 bv256egg_var_82))) (block 0_0_0_13_0_50_0 (1_0_0_11_0_49_0) ((bv256R253 bv256egg_var_83)))\
+        (block 2_0_0_11_0_51_0 (0_0_0_13_0_50_0) ((bv256R263 bv256egg_var_84) (bv256tacRetval0@11 bv256R263))) (block 34_0_0_0_0_0_0 (2_0_0_11_0_51_0)\
+        ((bv256val_x360 bv256tacRetval0@11) (bv256tacTmp362 bv256val_x360) (bv256tacTmp363 2) (boolcertoraAssert_1 (bit== bv256tacTmp362 2))))))";
+        let expected = "";
+        check_test(program_sexp, expected);
+
+    }
+
 }
