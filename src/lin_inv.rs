@@ -49,6 +49,15 @@ pub struct EggAssign {
     pub lhs: String,
     pub rhs: Option<String>,
 }
+impl EggAssign {
+    #[cfg(test)]
+    fn new(lhs: impl AsRef<str>, rhs: impl AsRef<str>) -> Self {
+        Self {
+            lhs: lhs.as_ref().to_string(),
+            rhs: Some(rhs.as_ref().to_string()),
+        }
+    }
+}
 
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
@@ -412,7 +421,7 @@ mod tests {
     use super::*;
     use egg::{RecExpr, Symbol};
     use primitive_types::U256;
-    use rust_evm::{eval_evm, WrappedU256, EVM};
+    use rust_evm::{WrappedU256, EVM};
 
     fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
         let _ = env_logger::builder().try_init();
