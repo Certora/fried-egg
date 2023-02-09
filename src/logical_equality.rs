@@ -122,7 +122,8 @@ impl Analysis<EVM> for LogicalAnalysis {
             cvec.shuffle(&mut thread_rng());
             cvec.extend(egraph.analysis.special_constants.clone());
             cvec.extend((0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()));
-            cvec[..CVEC_LEN].to_vec()
+            cvec.truncate(CVEC_LEN);
+            cvec
         } else if egraph.analysis.cvec_enabled {
             let get_evec = |child_index, cvec_index| {
                 let &child = enode.children().get(child_index)?;
