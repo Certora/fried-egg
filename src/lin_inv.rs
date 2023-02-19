@@ -369,7 +369,7 @@ fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 }
 
 // Entry point
-pub fn start_optimize(assignments: Sexp) -> String {
+pub fn start_optimize(assignments: &Sexp) -> String {
     let mut ss: Vec<EggAssign> = vec![];
 
     if let Sexp::List(ref list) = assignments {

@@ -10,33 +10,31 @@ use logical_equality::start_logical;
 
 fn main() {
     let stdin = io::stdin();
-    'outer: for line in stdin.lock().lines() {
+    for line in stdin.lock().lines() {
         let expr = parse_str(&line.unwrap()).unwrap();
-        if let Sexp::List(list) = expr {
-            if let Sexp::String(atom) = &list[0] {
-                match atom.as_ref() {
-                    "logical_eq" => {
-                        println!(
-                            "{}",
-                            start_logical(
-                                list[1].to_string(),
-                                list[2].to_string(),
-                                list[3].to_string().parse().unwrap()
-                            )
-                        );
-                    }
-                    "optimize" => {
-                        let mut iter = list.into_iter();
-                        iter.next();
-                        println!("{}", start_optimize(iter.next().unwrap()));
-                    }
-                    "exit" => break 'outer,
-                    _ => panic!("unknown command {}", atom),
-                }
-            }
-            io::stdout().flush().unwrap();
+        let list = if let Sexp::List(list) = &expr {
+            list.as_slice()
         } else {
             panic!("Expected an s-expression, got: {}", expr);
+        };
+        let atom = if let Sexp::String(atom) = &list[0] {
+            atom.as_str()
+        } else {
+            continue;
+        };
+        match (atom, &list[1..]) {
+            ("logical_eq", [expr1, expr2, timeout, ..]) => println!(
+                "{}",
+                start_logical(
+                    expr1.to_string(),
+                    expr2.to_string(),
+                    timeout.to_string().parse().unwrap()
+                )
+            ),
+            ("optimize", [assignment, ..]) => println!("{}", start_optimize(assignment)),
+            ("exit", _) => return,
+            _ => panic!("unknown command {:?}", list),
         }
+        io::stdout().flush().unwrap();
     }
 }
