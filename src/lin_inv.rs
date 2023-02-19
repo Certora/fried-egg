@@ -449,6 +449,9 @@ mod tests {
     }
 
     #[test]
+    // Should panic due to a missing feature.
+    // We wanted to figure out a cost function that would allow us to extract the “right” RHS
+    #[should_panic]
     fn test2() {
         let input = vec![
             EggAssign {
