@@ -287,35 +287,30 @@ impl TacOptimizer {
                 .insert(egg::Symbol::from(assign.lhs.clone()), index + 1);
         }
 
-        let mut roots = vec![];
-        let mut res = vec![];
         // add lhs and rhs of each assignment to a new egraph
         // and union their eclasses
+        let mut roots = Vec::with_capacity(block_assgns.len());
         for assign in &block_assgns {
+            let id_l = self.egraph.add_expr(&assign.lhs.parse().unwrap());
             if let Some(rhs) = &assign.rhs {
-                let id_l = self.egraph.add_expr(&assign.lhs.parse().unwrap());
                 assert!(!rhs.is_empty(), "RHS of this assignment is empty!");
                 let rhs_parsed: PatternAst<EVM> = rhs.parse().unwrap();
                 // unbound variables have age 0
                 for node in rhs_parsed.as_ref() {
                     if let ENodeOrVar::ENode(EVM::Var(name)) = node {
-                        if self.egraph.analysis.age_map.get(name).is_none() {
-                            self.egraph.analysis.age_map.insert(*name, 0);
-                        }
+                        self.egraph.analysis.age_map.entry(*name).or_default();
                     }
                 }
-
                 self.egraph.union_instantiations(
                     &assign.lhs.parse().unwrap(),
                     &rhs_parsed,
                     &Default::default(),
                     "assignment",
                 );
-                roots.push(id_l);
-            } else {
-                roots.push(self.egraph.add_expr(&assign.lhs.parse().unwrap()));
             }
+            roots.push(id_l);
         }
+
         log::info!("Done adding terms to the egraph.");
         self.egraph.rebuild();
 
@@ -330,36 +325,40 @@ impl TacOptimizer {
         runner.egraph.rebuild();
         log::info!("Done running rules.");
         //runner.egraph.dot().to_svg("target/foo.svg").unwrap();
-        for (c, id) in roots.into_iter().enumerate() {
-            // TODO: carefully think why we know that the RHS corresponds to this LHS?
-            // I think the root ids have the right order but need to be careful.
-            let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
-            // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
-            // let best_l = extract_left.find_best(id).1;
-            // check that this is indeed a var.
-            if let EVM::Var(vl) = best_l.as_ref()[0] {
-                let vl_age = *runner.egraph.analysis.age_map.get(&vl).unwrap();
-                let extract_right = Extractor::new(
+        roots
+            .into_iter()
+            .enumerate()
+            .filter_map(|(c, id)| {
+                // TODO: carefully think why we know that the RHS corresponds to this LHS?
+                // I think the root ids have the right order but need to be careful.
+                let best_l: &RecExpr<EVM> = &block_assgns[c].lhs.parse().unwrap();
+                // let extract_left = Extractor::new(&runner.egraph, LHSCostFn);
+                // let best_l = extract_left.find_best(id).1;
+                // check that this is indeed a var.
+                let lhs = if let EVM::Var(vl) = best_l.as_ref()[0] {
+                    Some(vl)
+                } else {
+                    None
+                }?;
+
+                let (_, best_r) = Extractor::new(
                     &runner.egraph,
                     RHSCostFn {
                         age_map: &runner.egraph.analysis.age_map,
-                        age_limit: vl_age,
-                        lhs: vl,
+                        age_limit: runner.egraph.analysis.age_map[&lhs],
+                        lhs,
                     },
-                );
-                let best_r = extract_right.find_best(id).1.to_string();
-                let assg = EggAssign {
-                    lhs: best_l.to_string(),
-                    rhs: if best_r == best_l.to_string() {
-                        None
-                    } else {
-                        Some(best_r.to_string())
-                    },
-                };
-                res.push(assg);
-            }
-        }
-        res
+                )
+                .find_best(id);
+
+                let lhs = best_l.to_string();
+                let rhs = best_r.to_string();
+                Some(EggAssign {
+                    rhs: (rhs != lhs).then(|| rhs),
+                    lhs,
+                })
+            })
+            .collect()
     }
 }
 
@@ -370,50 +369,33 @@ fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 
 // Entry point
 pub fn start_optimize(assignments: &Sexp) -> String {
-    let mut ss: Vec<EggAssign> = vec![];
+    let ss = assignments
+        .list()
+        .unwrap()
+        .into_iter()
+        .map(|pair| match pair.list().unwrap().as_slice() {
+            [lhs, rhs, ..] => EggAssign {
+                lhs: lhs.s().unwrap(),
+                rhs: Some(rhs.s().unwrap()),
+            },
+            [lhs, ..] => EggAssign {
+                lhs: lhs.s().unwrap(),
+                rhs: None,
+            },
+            [] => panic!("Empty assignment pair"),
+        })
+        .collect();
 
-    if let Sexp::List(ref list) = assignments {
-        for pair in list {
-            if let Sexp::List(ref pair_list) = pair {
-                let option_pair = (pair_list.get(0), pair_list.get(1));
-                if let (Some(Sexp::String(lhs)), Some(rhs)) = option_pair {
-                    ss.push(EggAssign {
-                        lhs: lhs.clone(),
-                        rhs: Some(rhs.to_string()),
-                    });
-                } else if let (Some(Sexp::String(lhs)), None) = option_pair {
-                    ss.push(EggAssign {
-                        lhs: lhs.clone(),
-                        rhs: None,
-                    });
-                } else {
-                    panic!("Invalid assignment pair: {:?}", pair_list);
-                }
-            } else {
-                panic!("Expected a list of pairs!");
-            }
-        }
-    } else {
-        panic!("Expected a list of assignments!");
-    }
-
-    let mut res = vec![];
-    for assignment in start(ss) {
-        if let Some(right) = assignment.rhs {
+    let res = start(ss)
+        .into_iter()
+        .filter_map(|assignment| {
+            let right = assignment.rhs.as_ref()?;
             let right = parse_str(&right).unwrap();
-            res.push(Sexp::List(vec![Sexp::String(assignment.lhs), right]));
-        }
-    }
+            Some(Sexp::List(vec![Sexp::String(assignment.lhs), right]))
+        })
+        .collect();
 
     Sexp::List(res).to_string()
-
-    // match Command::parse() {
-    //     Command::Optimize(params) => {
-    //         let opt = TacOptimizer::new(params);
-    //         opt.run()
-
-    //     }
-    // }
 }
 
 #[cfg(test)]
@@ -490,11 +472,12 @@ mod tests {
             EggAssign::new("R1", "64"),
             EggAssign::new("R2", "(- 32 R1)"),
         ];
-        let expected =
-            vec![
+        let expected = vec![
             EggAssign::new("R1", "64"),
-            EggAssign::new("R2",
-                "115792089237316195423570985008687907853269984665640564039457584007913129639904"),
+            EggAssign::new(
+                "R2",
+                "115792089237316195423570985008687907853269984665640564039457584007913129639904",
+            ),
         ];
         check_test(input, expected);
     }
