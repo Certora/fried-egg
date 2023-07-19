@@ -68,10 +68,19 @@ pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, 
     (runner.are_equal(&expr1, &expr2), false)
 }
 
+// pub fn start_logical_pair_with_assumptions(exprs: Vec<Sexp>) -> (bool, bool) {
+//    exprs.pop_front()
+// }
+
 pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
     let res = start_logical_pair(expr1, expr2, timeout);
     format!("({} {})", res.0, res.1)
 }
+
+// pub fn start_logical_with_assumptions(exprs: Vec<Sexp>) -> String {
+//    let res = start_logical_pair_with_assumptions(exprs);
+//    format!("({} {})", res.0, res.1)
+// }
 
 pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
     let str_rules = get_pregenerated_rules();
@@ -310,6 +319,23 @@ impl LogicalRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_egg_equivalence() {
+        let queries = vec![
+            ("(+ 32 R213)", "(+ k R213)"),
+            ("(* (- 1 (/ (+ 5 (+ 6 R212)) 32)) (+ 6 R212))", "(+ k R212)"),
+        ];
+        for (lhs, rhs) in queries {
+            let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
+            if !res.0 {
+                if res.1 {
+                    panic!("Proved unequal: {} and {}", lhs, rhs,);
+                }
+                panic!("could not prove equal {},   {}", lhs, rhs);
+            }
+        }
+    }
 
     #[test]
     fn logical_proves_equal() {

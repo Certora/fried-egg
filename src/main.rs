@@ -2,10 +2,10 @@ use std::io::{self, BufRead, Write};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
-pub(crate) mod lin_inv;
+// pub(crate) mod lin_inv;
 pub(crate) mod logical_equality;
 
-use lin_inv::start_optimize;
+// use lin_inv::start_optimize;
 use logical_equality::start_logical;
 
 fn main() {
@@ -25,11 +25,11 @@ fn main() {
                             )
                         );
                     }
-                    "optimize" => {
-                        let mut iter = list.into_iter();
-                        iter.next();
-                        println!("{}", start_optimize(iter.next().unwrap()));
-                    }
+                    // "optimize" => {
+                    //    let mut iter = list.into_iter();
+                    //    iter.next();
+                    //    println!("{}", start_optimize(iter.next().unwrap()));
+                    // }
                     "exit" => break 'outer,
                     _ => panic!("unknown command {}", atom),
                 }
