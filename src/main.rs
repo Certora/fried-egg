@@ -19,9 +19,9 @@ fn main() {
                         println!(
                             "{}",
                             start_logical(
-                                list[1].to_string(),
-                                list[2].to_string(),
-                                list[3].to_string().parse().unwrap()
+                                list.clone()[1].to_string(),
+                                list.clone()[2..list.clone().len() - 1].iter_mut().map(|e| e.to_string()).collect(),
+                                list.clone()[list.clone().len() - 1].to_string().parse().unwrap()
                             )
                         );
                     }

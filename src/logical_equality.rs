@@ -4,6 +4,7 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
+// use symbolic_expressions::Sexp;
 
 use serde_json::Value;
 
@@ -68,13 +69,47 @@ pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, 
     (runner.are_equal(&expr1, &expr2), false)
 }
 
+pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> Vec<(bool, bool)> {
+    let mut result = vec![];
+
+    let parsed_expr = expr.parse::<RecExpr<EVM>>().unwrap();
+
+    for other in others {
+        if expr == other {
+            result.push((true, true));
+        }
+        let mut runner = LogicalRunner::new();
+        runner.add_expr(&parsed_expr);
+
+        let other = other.parse::<RecExpr<EVM>>().unwrap();
+        runner.add_expr(&other);
+
+        if runner.are_unequal_fuzzing(&parsed_expr, &other) {
+            result.push((false, true));
+        }
+
+        runner.run(timeout);
+        result.push((runner.are_equal(&parsed_expr, &other), false))
+    }
+    result
+}
+
 // pub fn start_logical_pair_with_assumptions(exprs: Vec<Sexp>) -> (bool, bool) {
 //    exprs.pop_front()
 // }
 
-pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
-    let res = start_logical_pair(expr1, expr2, timeout);
-    format!("({} {})", res.0, res.1)
+// pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
+//    let res = start_logical_pair(expr1, expr2, timeout);
+//    format!("({} {})", res.0, res.1)
+// }
+
+pub fn start_logical(expr: String, exprs: Vec<String>, timeout: u64) -> String {
+    let res = start_logical_batch(
+        expr,
+        exprs,
+        timeout);
+
+    format!("({} {})", res[0].0, res[0].1)
 }
 
 // pub fn start_logical_with_assumptions(exprs: Vec<Sexp>) -> String {
@@ -323,8 +358,8 @@ mod tests {
     #[test]
     fn test_egg_equivalence() {
         let queries = vec![
-            ("(+ 32 R213)", "(+ k R213)"),
-            ("(* (- 1 (/ (+ 5 (+ 6 R212)) 32)) (+ 6 R212))", "(+ k R212)"),
+            ("(+ (/ (+ 5 (+ 6 R271)) 32) R272)", "(+ R272 5)"),
+            ("(+ (- 6 (+ 6 R272) 20)", "(+ R272 20)"),
         ];
         for (lhs, rhs) in queries {
             let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
