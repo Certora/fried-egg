@@ -85,27 +85,13 @@ pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> V
     result
 }
 
-// pub fn start_logical_pair_with_assumptions(exprs: Vec<Sexp>) -> (bool, bool) {
-//    exprs.pop_front()
-// }
-
-// pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
-//    let res = start_logical_pair(expr1, expr2, timeout);
-//    format!("({} {})", res.0, res.1)
-// }
-
 pub fn start_logical(list: Vec<Sexp>) -> String {
     let res = start_logical_batch(list.clone()[1].to_string(),
                                   list.clone()[2..list.clone().len() - 1].iter_mut().map(|e| e.to_string()).collect(),
                                   list.clone()[list.clone().len() - 1].to_string().parse().unwrap());
 
-    format!("({} {})", res[0].0, res[0].1)
+    format!("({:?})", res)
 }
-
-// pub fn start_logical_with_assumptions(exprs: Vec<Sexp>) -> String {
-//    let res = start_logical_pair_with_assumptions(exprs);
-//    format!("({} {})", res.0, res.1)
-// }
 
 pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
     get_pregenerated_rules()
