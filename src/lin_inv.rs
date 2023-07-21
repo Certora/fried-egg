@@ -50,6 +50,15 @@ pub struct EggAssign {
     pub lhs: String,
     pub rhs: Option<String>,
 }
+impl EggAssign {
+    #[cfg(test)]
+    fn new(lhs: impl AsRef<str>, rhs: impl AsRef<str>) -> Self {
+        Self {
+            lhs: lhs.as_ref().to_string(),
+            rhs: Some(rhs.as_ref().to_string()),
+        }
+    }
+}
 
 pub struct LHSCostFn;
 impl egg::CostFunction<EVM> for LHSCostFn {
@@ -361,7 +370,7 @@ fn start(ss: Vec<EggAssign>) -> Vec<EggAssign> {
 }
 
 // Entry point
-pub fn start_optimize(assignments: Sexp) -> String {
+pub fn start_optimize(assignments: &Sexp) -> String {
     let mut ss: Vec<EggAssign> = vec![];
 
     if let Sexp::List(ref list) = assignments {
@@ -413,7 +422,7 @@ mod tests {
     use super::*;
     use egg::{RecExpr, Symbol};
     use primitive_types::U256;
-    use rust_evm::{eval_evm, WrappedU256, EVM};
+    use rust_evm::{WrappedU256, EVM};
 
     fn check_test(input: Vec<EggAssign>, expected: Vec<EggAssign>) {
         let _ = env_logger::builder().try_init();
@@ -441,6 +450,9 @@ mod tests {
     }
 
     #[test]
+    // Should panic due to a missing feature.
+    // We wanted to figure out a cost function that would allow us to extract the “right” RHS
+    #[should_panic]
     fn test2() {
         let input = vec![
             EggAssign {

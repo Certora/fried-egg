@@ -1,7 +1,11 @@
 #!/bin/bash
 
+# The first argument to this script should be the path to the EVMVerifier/bin directory
+
 cd fried-egg && cargo build --release && cd ../
 
-rm "$CERTORA/tac_optimizer" 2>/dev/null || true
-mv "fried-egg/target/release/tac_optimizer" "$CERTORA"
+dir=${1}
+
+rm "$dir/tac_optimizer" 2>/dev/null || true
+mv "fried-egg/target/release/tac_optimizer" "$dir"
 
