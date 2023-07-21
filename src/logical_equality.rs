@@ -4,7 +4,7 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
-// use symbolic_expressions::Sexp;
+use symbolic_expressions::Sexp;
 
 use serde_json::Value;
 
@@ -94,11 +94,10 @@ pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> V
 //    format!("({} {})", res.0, res.1)
 // }
 
-pub fn start_logical(expr: String, exprs: Vec<String>, timeout: u64) -> String {
-    let res = start_logical_batch(
-        expr,
-        exprs,
-        timeout);
+pub fn start_logical(list: Vec<Sexp>) -> String {
+    let res = start_logical_batch(list.clone()[1].to_string(),
+                                  list.clone()[2..list.clone().len() - 1].iter_mut().map(|e| e.to_string()).collect(),
+                                  list.clone()[list.clone().len() - 1].to_string().parse().unwrap());
 
     format!("({} {})", res[0].0, res[0].1)
 }

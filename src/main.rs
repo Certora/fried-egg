@@ -10,33 +10,29 @@ use logical_equality::start_logical;
 
 fn main() {
     let stdin = io::stdin();
-    'outer: for line in stdin.lock().lines() {
+    for line in stdin.lock().lines() {
         let expr = parse_str(&line.unwrap()).unwrap();
-        if let Sexp::List(list) = expr {
-            if let Sexp::String(atom) = &list[0] {
-                match atom.as_ref() {
-                    "logical_eq" => {
-                        println!(
-                            "{}",
-                            start_logical(
-                                list.clone()[1].to_string(),
-                                list.clone()[2..list.clone().len() - 1].iter_mut().map(|e| e.to_string()).collect(),
-                                list.clone()[list.clone().len() - 1].to_string().parse().unwrap()
-                            )
-                        );
-                    }
-                    // "optimize" => {
-                    //    let mut iter = list.into_iter();
-                    //    iter.next();
-                    //    println!("{}", start_optimize(iter.next().unwrap()));
-                    // }
-                    "exit" => break 'outer,
-                    _ => panic!("unknown command {}", atom),
-                }
-            }
-            io::stdout().flush().unwrap();
+        let list = if let Sexp::List(list) = &expr {
+            list.as_slice()
         } else {
             panic!("Expected an s-expression, got: {}", expr);
+        };
+        let atom = if let Sexp::String(atom) = &list[0] {
+            atom.as_str()
+        } else {
+            continue;
+        };
+        match atom {
+            "logical_eq" => {
+            println!(
+                "{}",
+                start_logical(list.to_vec())
+            )
+            },
+            // "optimize" => println!("{}", start_optimize(list[1])),
+            "exit" => return,
+            _ => panic!("unknown command {:?}", list),
         }
+        io::stdout().flush().unwrap();
     }
 }
