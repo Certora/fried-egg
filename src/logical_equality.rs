@@ -5,6 +5,7 @@ use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
 use symbolic_expressions::Sexp;
+use symbolic_expressions::parser::parse_str;
 
 use serde_json::Value;
 
@@ -46,6 +47,7 @@ pub fn get_pregenerated_rules() -> Vec<(String, String)> {
         .collect()
 }
 
+
 pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, bool) {
     if expr1 == expr2 {
         return (true, true);
@@ -61,36 +63,78 @@ pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, 
     }
 }
 
+
 pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> Vec<(bool, bool)> {
     let mut result = vec![];
-
     let parsed_expr = expr.parse::<RecExpr<EVM>>().unwrap();
 
     for other in others {
         if expr == other {
             result.push((true, true));
+        } else {
+            let mut runner = LogicalRunner::new();
+            runner.add_expr(&parsed_expr);
+
+            let other = other.parse::<RecExpr<EVM>>().unwrap();
+            runner.add_expr(&other);
+
+            if runner.are_unequal_fuzzing(&parsed_expr, &other) {
+                result.push((false, true));
+            } else {
+                result.push((runner.run(timeout).are_equal(&parsed_expr, &other), false))
+            }
         }
-        let mut runner = LogicalRunner::new();
-        runner.add_expr(&parsed_expr);
-
-        let other = other.parse::<RecExpr<EVM>>().unwrap();
-        runner.add_expr(&other);
-
-        if runner.are_unequal_fuzzing(&parsed_expr, &other) {
-            result.push((false, true));
-        }
-
-        result.push((runner.run(timeout).are_equal(&parsed_expr, &other), false))
     }
     result
 }
 
-pub fn start_logical(list: Vec<Sexp>) -> String {
-    let res = start_logical_batch(list.clone()[1].to_string(),
-                                  list.clone()[2..list.clone().len() - 1].iter_mut().map(|e| e.to_string()).collect(),
-                                  list.clone()[list.clone().len() - 1].to_string().parse().unwrap());
+pub fn start_logical(list: &[Sexp]) -> String {
+    let copy = list.clone();
 
-    format!("({:?})", res)
+    //for element in copy {
+    //    println!("element... {}", element);
+    //}
+
+    let mut vec_copy = copy.to_vec();
+
+    //for element in vec_copy.clone() {
+    //    println!("element vec... {}", element);
+    //}
+
+    let first = vec_copy.clone().first().unwrap().to_string();
+    let expr = &vec_copy[1].clone();
+    let timeout = &vec_copy[vec_copy.len() - 1].clone().to_string().parse().unwrap();
+
+    // need a more idiomatic way to do this but for now we are stepping thru sloooooowwwwwllllyyyy
+    vec_copy.remove(0);
+    vec_copy.remove(0);
+    vec_copy.remove(vec_copy.len() - 1);
+
+    //println!("vec copy after mutation: {:?}", vec_copy);
+    // println!("first! {}, expr: {}, timeout: {}", first, expr, timeout);
+
+    let middle: Vec<String> = vec_copy.iter_mut().map(|e| e.to_string()).collect();
+
+    // println!("middle: {:?}", middle);
+
+    let mut res = start_logical_batch(expr.to_string(), middle, *timeout);
+
+    // println!("result {:?}", res);
+
+    let mut str = format!("(").to_owned();
+
+    for (i, e) in &mut res.iter().enumerate() {
+        let mut extra = "".to_owned();
+        if i == 0 {
+            extra = format!("({} {})", e.0, e.1).to_owned();
+        } else {
+            extra = format!(" ({} {})", e.0, e.1).to_owned();
+        }
+        // println!("extra: {}", extra.clone());
+        str = format!("{}{}", str, extra);
+    }
+    str = format!("{}{}", str, ")");
+    str
 }
 
 pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
@@ -330,6 +374,21 @@ mod tests {
     //        }
     //    }
     //}
+
+    #[test]
+    fn test_start_logical_batch() {
+        let query = "(logical_eq (+ (/ (+ 5 (+ 6 R271)) 32) R272) (+ R272 5) (+ R272 6) (+ R272 32) 250)";
+        let expr = parse_str(&query).unwrap();
+        let list = if let Sexp::List(list) = &expr {
+            list.as_slice()
+        } else {
+          panic!("Expected an s-expression, got: {}", expr);
+        };
+        for element in list.iter() {
+            println!("{}", element);
+        }
+        println!("{}", start_logical(list));
+    }
 
     #[test]
     fn logical_proves_equal() {

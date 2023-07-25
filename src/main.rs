@@ -26,7 +26,7 @@ fn main() {
             "logical_eq" => {
             println!(
                 "{}",
-                start_logical(list.to_vec())
+                start_logical(list)
             )
             },
             // "optimize" => println!("{}", start_optimize(list[1])),
