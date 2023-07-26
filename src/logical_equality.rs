@@ -90,19 +90,13 @@ pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> V
 
 pub fn start_logical(list: &[Sexp]) -> String {
     let mut vec_copy = list.clone().to_vec();
-
-    let first = vec_copy.clone().first().unwrap().to_string();
-    let timeout = &vec_copy[vec_copy.len() - 1].clone().to_string().parse().unwrap();
-
-    // need a more idiomatic way to do this but for now we are stepping thru sloooooowwwwwllllyyyy
     vec_copy.remove(0);
-    vec_copy.remove(0);
-    vec_copy.remove(vec_copy.len() - 1);
 
-    let middle: Vec<String> = vec_copy.iter_mut().map(|e| e.to_string()).collect();
-    let res = start_logical_batch(first, middle, *timeout);
+    let res = start_logical_batch(vec_copy.first().unwrap().to_string(),
+        vec_copy.clone()[1..vec_copy.len()-1].iter_mut().map(|e| e.to_string()).collect(),
+        vec_copy[vec_copy.len() - 1].clone().to_string().parse().unwrap());
+
     let mut str = format!("(").to_owned();
-
     for (i, e) in &mut res.iter().enumerate() {
         let extra;
         if i == 0 {
