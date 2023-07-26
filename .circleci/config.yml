@@ -76,3 +76,4 @@ workflows:
   build-test:
     jobs:
       - test
+      - nits

@@ -4,8 +4,8 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
-use symbolic_expressions::Sexp;
 use symbolic_expressions::parser::parse_str;
+use symbolic_expressions::Sexp;
 
 use serde_json::Value;
 
@@ -90,9 +90,18 @@ pub fn start_logical(list: &[Sexp]) -> String {
     let mut vec_copy = list.to_vec();
     vec_copy.remove(0);
 
-    let res = start_logical_batch(vec_copy.first().unwrap().to_string(),
-        vec_copy.clone()[1..vec_copy.len()-1].iter_mut().map(|e| e.to_string()).collect(),
-        vec_copy[vec_copy.len() - 1].clone().to_string().parse().unwrap());
+    let res = start_logical_batch(
+        vec_copy.first().unwrap().to_string(),
+        vec_copy.clone()[1..vec_copy.len() - 1]
+            .iter_mut()
+            .map(|e| e.to_string())
+            .collect(),
+        vec_copy[vec_copy.len() - 1]
+            .clone()
+            .to_string()
+            .parse()
+            .unwrap(),
+    );
 
     let mut str = "(".to_string();
     for (i, e) in &mut res.iter().enumerate() {
@@ -274,9 +283,9 @@ impl LogicalRunner {
     }
 
     pub fn add_pair(&mut self, expr1: &RecExpr<EVM>, expr2: &RecExpr<EVM>) -> &'_ mut Self {
-            self.add_expr(expr1).add_expr(expr2);
-            self.exprs.push((expr1.clone(), expr2.clone()));
-            self
+        self.add_expr(expr1).add_expr(expr2);
+        self.exprs.push((expr1.clone(), expr2.clone()));
+        self
     }
 
     pub fn are_unequal_fuzzing(&mut self, lhs: &RecExpr<EVM>, rhs: &RecExpr<EVM>) -> bool {
@@ -335,7 +344,7 @@ mod tests {
         let list = if let Sexp::List(list) = &expr {
             list.as_slice()
         } else {
-          panic!("Expected an s-expression, got: {}", expr);
+            panic!("Expected an s-expression, got: {}", expr);
         };
         println!("result: {}", start_logical(list));
         assert_eq!(start_logical(list), "((false true))");
@@ -343,14 +352,18 @@ mod tests {
 
     #[test]
     fn test_start_logical_batch() {
-        let query = "(logical_eq (+ (/ (+ 5 (+ 6 R271)) 32) R272) (+ R272 5) (+ R272 6) (+ R272 32) 250)";
+        let query =
+            "(logical_eq (+ (/ (+ 5 (+ 6 R271)) 32) R272) (+ R272 5) (+ R272 6) (+ R272 32) 250)";
         let expr = parse_str(&query).unwrap();
         let list = if let Sexp::List(list) = &expr {
             list.as_slice()
         } else {
-          panic!("Expected an s-expression, got: {}", expr);
+            panic!("Expected an s-expression, got: {}", expr);
         };
-        assert_eq!(start_logical(list), "((false true) (false true) (false true))");
+        assert_eq!(
+            start_logical(list),
+            "((false true) (false true) (false true))"
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use clap::Parser;
 use egg::*;
-use serde::*;
 use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
+use serde::*;
 use std::{cmp::*, collections::HashMap};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
@@ -578,4 +578,3 @@ R2605 = tacRC
 B2608 = (== R2605 0)
 B2614 = (! B2608)
 */
-

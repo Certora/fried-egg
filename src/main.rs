@@ -24,11 +24,8 @@ fn main() {
         };
         match atom {
             "logical_eq" => {
-            println!(
-                "{}",
-                start_logical(list)
-            )
-            },
+                println!("{}", start_logical(list))
+            }
             "optimize" => println!("{}", start_optimize(&list[1])),
             "exit" => return,
             _ => panic!("unknown command {:?}", list),
