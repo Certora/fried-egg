@@ -5,6 +5,7 @@ use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
 use symbolic_expressions::Sexp;
+use symbolic_expressions::parser::parse_str;
 
 use serde_json::Value;
 
@@ -44,6 +45,21 @@ pub fn get_pregenerated_rules() -> Vec<(String, String)> {
             "(+ (* ?a ?b) (* ?a ?c))".to_string(),
         )])
         .collect()
+}
+
+pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, bool) {
+    if expr1 == expr2 {
+        return (true, true);
+    }
+    let expr1 = expr1.parse().unwrap();
+    let expr2 = expr2.parse().unwrap();
+    let mut runner = LogicalRunner::new();
+    runner.add_pair(&expr1, &expr2);
+    if runner.are_unequal_fuzzing(&expr1, &expr2) {
+        (false, true)
+    } else {
+        (runner.run(timeout).are_equal(&expr1, &expr2), false)
+    }
 }
 
 pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> Vec<(bool, bool)> {
@@ -255,6 +271,12 @@ impl LogicalRunner {
         self.egraph.add_expr(expr);
         LogicalRunner::add_constants(&mut self.fuzzing_egraph, expr);
         self
+    }
+
+    pub fn add_pair(&mut self, expr1: &RecExpr<EVM>, expr2: &RecExpr<EVM>) -> &'_ mut Self {
+            self.add_expr(expr1).add_expr(expr2);
+            self.exprs.push((expr1.clone(), expr2.clone()));
+            self
     }
 
     pub fn are_unequal_fuzzing(&mut self, lhs: &RecExpr<EVM>, rhs: &RecExpr<EVM>) -> bool {
