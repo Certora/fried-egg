@@ -30,6 +30,7 @@ commands:
       # Build with caching
       - run: sudo apt-get update && sudo apt-get install -y cmake
       - restore_sccache_cache
+      - run: rm -rf .rustup
       - run: rustup update
       - run: cargo build --release
       - save_sccache_cache
