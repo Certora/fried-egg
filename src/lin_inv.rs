@@ -1,8 +1,6 @@
-/*
 use clap::Parser;
 use egg::*;
 use serde::*;
-// use statement::Stmt;
 use primitive_types::U256;
 use rust_evm::{eval_evm, EVM};
 use std::{cmp::*, collections::HashMap};
@@ -579,5 +577,4 @@ R2603 = 1
 R2605 = tacRC
 B2608 = (== R2605 0)
 B2614 = (! B2608)
-*/
 */

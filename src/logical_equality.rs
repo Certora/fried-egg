@@ -89,20 +89,9 @@ pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> V
 }
 
 pub fn start_logical(list: &[Sexp]) -> String {
-    let copy = list.clone();
-
-    //for element in copy {
-    //    println!("element... {}", element);
-    //}
-
-    let mut vec_copy = copy.to_vec();
-
-    //for element in vec_copy.clone() {
-    //    println!("element vec... {}", element);
-    //}
+    let mut vec_copy = list.clone().to_vec();
 
     let first = vec_copy.clone().first().unwrap().to_string();
-    let expr = &vec_copy[1].clone();
     let timeout = &vec_copy[vec_copy.len() - 1].clone().to_string().parse().unwrap();
 
     // need a more idiomatic way to do this but for now we are stepping thru sloooooowwwwwllllyyyy
@@ -110,27 +99,17 @@ pub fn start_logical(list: &[Sexp]) -> String {
     vec_copy.remove(0);
     vec_copy.remove(vec_copy.len() - 1);
 
-    //println!("vec copy after mutation: {:?}", vec_copy);
-    // println!("first! {}, expr: {}, timeout: {}", first, expr, timeout);
-
     let middle: Vec<String> = vec_copy.iter_mut().map(|e| e.to_string()).collect();
-
-    // println!("middle: {:?}", middle);
-
-    let mut res = start_logical_batch(expr.to_string(), middle, *timeout);
-
-    // println!("result {:?}", res);
-
+    let res = start_logical_batch(first, middle, *timeout);
     let mut str = format!("(").to_owned();
 
     for (i, e) in &mut res.iter().enumerate() {
-        let mut extra = "".to_owned();
+        let extra;
         if i == 0 {
             extra = format!("({} {})", e.0, e.1).to_owned();
         } else {
             extra = format!(" ({} {})", e.0, e.1).to_owned();
         }
-        // println!("extra: {}", extra.clone());
         str = format!("{}{}", str, extra);
     }
     str = format!("{}{}", str, ")");
@@ -358,22 +337,17 @@ impl LogicalRunner {
 mod tests {
     use super::*;
 
-    // #[test]
-    // fn test_egg_equivalence() {
-    //    let queries = vec![
-    //        ("(+ (/ (+ 5 (+ 6 R271)) 32) R272)", "(+ R272 5)"),
-    //        ("(+ (- 6 (+ 6 R272) 20)", "(+ R272 20)"),
-    //    ];
-    //    for (lhs, rhs) in queries {
-    //        let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
-    //        if !res.0 {
-    //            if res.1 {
-    //                panic!("Proved unequal: {} and {}", lhs, rhs,);
-    //            }
-    //            panic!("could not prove equal {},   {}", lhs, rhs);
-    //        }
-    //    }
-    //}
+    #[test]
+    fn test_pair() {
+        let query = "(logical_eq (< tacCalldatasize 4) (== tacCallvalue 0) 250)";
+        let expr = parse_str(&query).unwrap();
+        let list = if let Sexp::List(list) = &expr {
+            list.as_slice()
+        } else {
+          panic!("Expected an s-expression, got: {}", expr);
+        };
+        assert_eq!(start_logical(list), "((false true))");
+    }
 
     #[test]
     fn test_start_logical_batch() {
@@ -384,10 +358,7 @@ mod tests {
         } else {
           panic!("Expected an s-expression, got: {}", expr);
         };
-        for element in list.iter() {
-            println!("{}", element);
-        }
-        println!("{}", start_logical(list));
+        assert_eq!(start_logical(list), "((false true) (false true) (false true))");
     }
 
     #[test]

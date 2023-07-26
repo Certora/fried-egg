@@ -28,4 +28,5 @@ opt-level = 3
 
 [[bin]]
 name = "tac_optimizer"
+test = false
 bench = false
