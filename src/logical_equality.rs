@@ -101,7 +101,7 @@ pub fn start_logical(list: &[Sexp]) -> String {
         } else {
             format!(" ({} {})", e.0, e.1).to_owned()
         };
-        str = format!("{}{:?}", str, extra);
+        str = format!("{}{}", str, extra);
     }
     str = format!("{}{}", str, ")");
     str
@@ -337,6 +337,7 @@ mod tests {
         } else {
           panic!("Expected an s-expression, got: {}", expr);
         };
+        println!("result: {}", start_logical(list));
         assert_eq!(start_logical(list), "((false true))");
     }
 
