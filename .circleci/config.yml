@@ -30,6 +30,7 @@ commands:
       # Build with caching
       - run: sudo apt-get update && sudo apt-get install -y cmake
       - restore_sccache_cache
+      - run: rustup update
       - run: cargo build --release
       - save_sccache_cache
 
@@ -42,7 +43,6 @@ jobs:
       - image: &img certora/cvt-image:29
 
     steps:
-      - rustup update
       - checkout
       - build_fried_egg
 
