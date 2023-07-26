@@ -2,10 +2,10 @@ use std::io::{self, BufRead, Write};
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
-// pub(crate) mod lin_inv;
+pub(crate) mod lin_inv;
 pub(crate) mod logical_equality;
 
-// use lin_inv::start_optimize;
+use lin_inv::start_optimize;
 use logical_equality::start_logical;
 
 fn main() {
@@ -29,7 +29,7 @@ fn main() {
                 start_logical(list)
             )
             },
-            // "optimize" => println!("{}", start_optimize(list[1])),
+            "optimize" => println!("{}", start_optimize(&list[1])),
             "exit" => return,
             _ => panic!("unknown command {:?}", list),
         }

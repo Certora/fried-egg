@@ -5,7 +5,6 @@ use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
 use symbolic_expressions::Sexp;
-use symbolic_expressions::parser::parse_str;
 
 use serde_json::Value;
 
@@ -47,23 +46,6 @@ pub fn get_pregenerated_rules() -> Vec<(String, String)> {
         .collect()
 }
 
-
-pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, bool) {
-    if expr1 == expr2 {
-        return (true, true);
-    }
-    let expr1 = expr1.parse().unwrap();
-    let expr2 = expr2.parse().unwrap();
-    let mut runner = LogicalRunner::new();
-    runner.add_pair(&expr1, &expr2);
-    if runner.are_unequal_fuzzing(&expr1, &expr2) {
-        (false, true)
-    } else {
-        (runner.run(timeout).are_equal(&expr1, &expr2), false)
-    }
-}
-
-
 pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> Vec<(bool, bool)> {
     let mut result = vec![];
     let parsed_expr = expr.parse::<RecExpr<EVM>>().unwrap();
@@ -89,22 +71,21 @@ pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> V
 }
 
 pub fn start_logical(list: &[Sexp]) -> String {
-    let mut vec_copy = list.clone().to_vec();
+    let mut vec_copy = list.to_vec();
     vec_copy.remove(0);
 
     let res = start_logical_batch(vec_copy.first().unwrap().to_string(),
         vec_copy.clone()[1..vec_copy.len()-1].iter_mut().map(|e| e.to_string()).collect(),
         vec_copy[vec_copy.len() - 1].clone().to_string().parse().unwrap());
 
-    let mut str = format!("(").to_owned();
+    let mut str = "(".to_string();
     for (i, e) in &mut res.iter().enumerate() {
-        let extra;
-        if i == 0 {
-            extra = format!("({} {})", e.0, e.1).to_owned();
+        let extra = if i == 0 {
+            format!("({} {})", e.0, e.1).to_owned()
         } else {
-            extra = format!(" ({} {})", e.0, e.1).to_owned();
-        }
-        str = format!("{}{}", str, extra);
+            format!(" ({} {})", e.0, e.1).to_owned()
+        };
+        str = format!("{}{:?}", str, extra);
     }
     str = format!("{}{}", str, ")");
     str
@@ -273,12 +254,6 @@ impl LogicalRunner {
     pub fn add_expr(&mut self, expr: &RecExpr<EVM>) -> &'_ mut Self {
         self.egraph.add_expr(expr);
         LogicalRunner::add_constants(&mut self.fuzzing_egraph, expr);
-        self
-    }
-
-    pub fn add_pair(&mut self, expr1: &RecExpr<EVM>, expr2: &RecExpr<EVM>) -> &'_ mut Self {
-        self.add_expr(expr1).add_expr(expr2);
-        self.exprs.push((expr1.clone(), expr2.clone()));
         self
     }
 
