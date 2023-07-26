@@ -32,8 +32,8 @@ commands:
       - restore_sccache_cache
       - run: cargo build --release
       - save_sccache_cache
-      
-  
+
+
 
 
 jobs:
@@ -42,12 +42,13 @@ jobs:
       - image: &img certora/cvt-image:29
 
     steps:
+      - rustup update
       - checkout
       - build_fried_egg
 
       # Run tests
       - run: cargo test --release --all-targets
-  
+
   # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
     docker:
@@ -75,4 +76,3 @@ workflows:
     jobs:
       - test
       - nits
-    
