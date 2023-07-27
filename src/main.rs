@@ -22,17 +22,12 @@ fn main() {
         } else {
             continue;
         };
-        match (atom, &list[1..]) {
-            ("logical_eq", [expr1, expr2, timeout, ..]) => println!(
-                "{}",
-                start_logical(
-                    expr1.to_string(),
-                    expr2.to_string(),
-                    timeout.to_string().parse().unwrap()
-                )
-            ),
-            ("optimize", [assignment, ..]) => println!("{}", start_optimize(assignment)),
-            ("exit", _) => return,
+        match atom {
+            "logical_eq" => {
+                println!("{}", start_logical(list))
+            }
+            "optimize" => println!("{}", start_optimize(&list[1])),
+            "exit" => return,
             _ => panic!("unknown command {:?}", list),
         }
         io::stdout().flush().unwrap();

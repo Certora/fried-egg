@@ -22,9 +22,9 @@ symbolic_expressions = "5.0.3"
 num = "0.3"
 num-bigint = { version = "0.3", features = ["rand"] }
 
-
+[profile.test]
+opt-level = 3
 
 [[bin]]
 name = "tac_optimizer"
-test = false
 bench = false

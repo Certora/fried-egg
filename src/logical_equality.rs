@@ -4,6 +4,9 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
+#[allow(unused_imports)]
+use symbolic_expressions::parser::parse_str;
+use symbolic_expressions::Sexp;
 
 use serde_json::Value;
 
@@ -45,6 +48,7 @@ pub fn get_pregenerated_rules() -> Vec<(String, String)> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, bool) {
     if expr1 == expr2 {
         return (true, true);
@@ -60,9 +64,58 @@ pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, 
     }
 }
 
-pub fn start_logical(expr1: String, expr2: String, timeout: u64) -> String {
-    let res = start_logical_pair(expr1, expr2, timeout);
-    format!("({} {})", res.0, res.1)
+pub fn start_logical_batch(expr: String, others: Vec<String>, timeout: u64) -> Vec<(bool, bool)> {
+    let mut result = vec![];
+    let parsed_expr = expr.parse::<RecExpr<EVM>>().unwrap();
+
+    for other in others {
+        if expr == other {
+            result.push((true, true));
+        } else {
+            let mut runner = LogicalRunner::new();
+            runner.add_expr(&parsed_expr);
+
+            let other = other.parse::<RecExpr<EVM>>().unwrap();
+            runner.add_expr(&other);
+
+            if runner.are_unequal_fuzzing(&parsed_expr, &other) {
+                result.push((false, true));
+            } else {
+                result.push((runner.run(timeout).are_equal(&parsed_expr, &other), false))
+            }
+        }
+    }
+    result
+}
+
+pub fn start_logical(list: &[Sexp]) -> String {
+    let mut vec_copy = list.to_vec();
+    vec_copy.remove(0);
+
+    let res = start_logical_batch(
+        vec_copy.first().unwrap().to_string(),
+        vec_copy.clone()[1..vec_copy.len() - 1]
+            .iter_mut()
+            .map(|e| e.to_string())
+            .collect(),
+        vec_copy[vec_copy.len() - 1]
+            .clone()
+            .to_string()
+            .parse()
+            .unwrap(),
+    );
+
+    let mut str = "(".to_string();
+    for (i, e) in &mut res.iter().enumerate() {
+        let extra = if i == 0 {
+            format!("({} {})", e.0, e.1).to_owned()
+        } else {
+            format!(" ({} {})", e.0, e.1).to_owned()
+        };
+        str = format!("{}{}", str, extra);
+    }
+    str = format!("{}{}", str, ")");
+    str
 }
 
 pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
@@ -230,7 +283,7 @@ impl LogicalRunner {
         LogicalRunner::add_constants(&mut self.fuzzing_egraph, expr);
         self
     }
-
+    #[allow(dead_code)]
     pub fn add_pair(&mut self, expr1: &RecExpr<EVM>, expr2: &RecExpr<EVM>) -> &'_ mut Self {
         self.add_expr(expr1).add_expr(expr2);
         self.exprs.push((expr1.clone(), expr2.clone()));
@@ -285,6 +338,35 @@ impl LogicalRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pair() {
+        let query = "(logical_eq (< tacCalldatasize 4) (== tacCallvalue 0) 250)";
+        let expr = parse_str(&query).unwrap();
+        let list = if let Sexp::List(list) = &expr {
+            list.as_slice()
+        } else {
+            panic!("Expected an s-expression, got: {}", expr);
+        };
+        println!("result: {}", start_logical(list));
+        assert_eq!(start_logical(list), "((false true))");
+    }
+
+    #[test]
+    fn test_start_logical_batch() {
+        let query =
+            "(logical_eq (+ (/ (+ 5 (+ 6 R271)) 32) R272) (+ R272 5) (+ R272 6) (+ R272 32) 250)";
+        let expr = parse_str(&query).unwrap();
+        let list = if let Sexp::List(list) = &expr {
+            list.as_slice()
+        } else {
+            panic!("Expected an s-expression, got: {}", expr);
+        };
+        assert_eq!(
+            start_logical(list),
+            "((false true) (false true) (false true))"
+        );
+    }
 
     #[test]
     fn logical_proves_equal() {
