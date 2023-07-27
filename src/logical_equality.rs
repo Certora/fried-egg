@@ -4,6 +4,7 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rust_evm::{eval_evm, EVM};
 use std::time::Duration;
+#[allow(unused_imports)]
 use symbolic_expressions::parser::parse_str;
 use symbolic_expressions::Sexp;
 
@@ -47,6 +48,7 @@ pub fn get_pregenerated_rules() -> Vec<(String, String)> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, bool) {
     if expr1 == expr2 {
         return (true, true);
@@ -281,7 +283,7 @@ impl LogicalRunner {
         LogicalRunner::add_constants(&mut self.fuzzing_egraph, expr);
         self
     }
-
+    #[allow(dead_code)]
     pub fn add_pair(&mut self, expr1: &RecExpr<EVM>, expr2: &RecExpr<EVM>) -> &'_ mut Self {
         self.add_expr(expr1).add_expr(expr2);
         self.exprs.push((expr1.clone(), expr2.clone()));
