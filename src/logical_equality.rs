@@ -112,74 +112,98 @@ pub struct LogicalAnalysis {
     cvec_enabled: bool,
 }
 impl Analysis<EVM> for LogicalAnalysis {
-    type Data = Data;
+    type Data = Option<Data>;
 
     fn make(egraph: &EGraph, enode: &EVM) -> Self::Data {
         // cvecs used for fuzzing in the egraph
-        let cvec = if matches!(enode, EVM::Var(_)) && egraph.analysis.cvec_enabled {
-            let mut cvec = egraph.analysis.special_constants.clone();
-            // randomize order of constants
-            cvec.shuffle(&mut thread_rng());
-            cvec.extend(egraph.analysis.special_constants.clone());
-            cvec.extend((0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()));
-            cvec.truncate(CVEC_LEN);
-            cvec
-        } else if egraph.analysis.cvec_enabled {
-            let get_evec = |child_index, cvec_index| {
-                let &child = enode.children().get(child_index)?;
-                egraph[child].data.cvec.get(cvec_index).copied()
-            };
-            (0..CVEC_LEN)
-                .map(|cvec_index| (get_evec(0, cvec_index), get_evec(1, cvec_index)))
-                .map(|(first, second)| {
-                    eval_evm(enode, first, second).unwrap_or_else(|| {
-                        panic!(
-                            "eval_evm for {:?} failed, with children {:?} and {:?}",
-                            enode, first, second
-                        )
-                    })
-                })
-                .collect()
-        } else {
-            vec![]
-        };
-        let get_constant = |index| {
-            let &child = enode.children().get(index)?;
-            egraph[child].data.constant
-        };
-        let constant = eval_evm(enode, get_constant(0), get_constant(1));
+        let result = match enode {
+            EVM::SafeMathNarrow(_) => None,
+            _ => {
+                let cvec = vec![];
 
-        Data { cvec, constant }
+
+                /*
+                if matches!(enode, EVM::Var(_)) && egraph.analysis.cvec_enabled {
+                        let mut cvec = egraph.analysis.special_constants.clone();
+                        // randomize order of constants
+                        cvec.shuffle(&mut thread_rng());
+                        cvec.extend(egraph.analysis.special_constants.clone());
+                        cvec.extend((0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()));
+                        cvec.truncate(CVEC_LEN);
+                        cvec
+                    } else if egraph.analysis.cvec_enabled {
+                        let get_evec = |child_index, cvec_index| {
+                            let &child = enode.children().get(child_index)?;
+                            egraph[child].data.clone().unwrap().cvec.get(cvec_index).copied()
+                        };
+                        (0..CVEC_LEN)
+                            .map(|cvec_index| (get_evec(0, cvec_index), get_evec(1, cvec_index)))
+                            .map(|(first, second)| {
+                                eval_evm(enode, first, second).unwrap_or_else(|| {
+                                    panic!(
+                                        "eval_evm for {:?} failed, with children {:?} and {:?}",
+                                        enode, first, second
+                                    )
+                                })
+                            })
+                            .collect()
+                    } else {
+                        vec![]
+                    };
+                    */
+                    let get_constant = |index| {
+                        let &child = enode.children().get(index)?;
+                        match &egraph[child].data {
+                            None => None,
+                            Some(a) => a.constant
+                        }
+                        // egraph[child].data.clone().unwrap().constant
+                    };
+                    let constant = eval_evm(enode, get_constant(0), get_constant(1));
+
+                    Some(Data { cvec, constant })
+            }
+        };
+        result
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         let mut merge_l = false;
         let mut merge_r = false;
-        match (to.constant, from.constant) {
-            (None, Some(b)) => {
-                to.constant = Some(b);
-                merge_l = true;
-            }
-            (None, None) => (),
-            (Some(_), None) => {
-                merge_r = true;
-            }
-            (Some(a), Some(b)) => assert_eq!(a, b),
+        match (to.clone(), from.clone()) {
+            (Some(a), Some(b)) => {
+                match (a.constant, b.constant) {
+                    (None, Some(c)) => {
+                        to.clone().unwrap().constant = Some(c);
+                        merge_l = true;
+                    }
+                    (None, None) => (),
+                    (Some(_), None) => {
+                        merge_r = true;
+                    }
+                    (Some(d), Some(e)) => assert_eq!(d, e),
+                }
+            },
+            _ => (),
         }
-
         DidMerge(merge_l, merge_r)
     }
 
     fn modify(egraph: &mut EGraph, id: Id) {
         let class = &mut egraph[id];
-        if let Some(c) = class.data.constant {
-            let added = egraph.add(EVM::from(c));
-            egraph.union(id, added);
-            assert!(
-                !egraph[id].nodes.is_empty(),
-                "empty eclass! {:#?}",
-                egraph[id]
-            );
+        match &class.data {
+            None => {},
+            Some(a) => {
+                if let Some(c) = a.constant {
+                    let added = egraph.add(EVM::from(c));
+                    egraph.union(id, added);
+                    assert!(
+                        !egraph[id].nodes.is_empty(),
+                        "empty eclass! {:#?}",
+                        egraph[id]
+                    );
+                }
+            }
         }
     }
 }
@@ -241,8 +265,8 @@ impl LogicalRunner {
         let start_f = self.fuzzing_egraph.add_expr(lhs);
         let end_f = self.fuzzing_egraph.add_expr(rhs);
         self.fuzzing_egraph.rebuild();
-        let leftvec = &self.fuzzing_egraph[start_f].data.cvec;
-        let rightvec = &self.fuzzing_egraph[end_f].data.cvec;
+        let leftvec = &self.fuzzing_egraph[start_f].data.clone().unwrap().cvec;
+        let rightvec = &self.fuzzing_egraph[end_f].data.clone().unwrap().cvec;
         leftvec != rightvec
     }
 
@@ -285,6 +309,40 @@ impl LogicalRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uninterpreted_test() {
+        let queries = vec![
+            ("(+ (safe_math_narrow 115792089237316195423570985008687907853269984665640564039457584007913129639935) 115792089237316195423570985008687907853269984665640564039457584007913129639935)",
+            "(+ 115792089237316195423570985008687907853269984665640564039457584007913129639935 (safe_math_narrow 115792089237316195423570985008687907853269984665640564039457584007913129639935))")
+        ];
+        for (lhs, rhs) in queries {
+            let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
+                if !res.0 {
+                    if res.1 {
+                        panic!("Proved unequal: {} and {}", lhs, rhs,);
+                    }
+                    panic!("could not prove equal {},   {}", lhs, rhs);
+                }
+        }
+    }
+
+    #[test]
+    fn uninterpreted_test_2() {
+        let queries = vec![
+            ("(+ (safe_math_narrow 115792089237316195423570985008687907853269984665640564039457584007913129639935) 115792089237316195423570985008687907853269984665640564039457584007913129639935)",
+            "(+ (safe_math_narrow 115792089237316195423570985008687907853269984665640564039457584007913129639935) 115792089237316195423570985008687907853269984665640564039457584007913129639935)")
+        ];
+        for (lhs, rhs) in queries {
+            let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
+                if !res.0 {
+                    if res.1 {
+                        panic!("Proved unequal: {} and {}", lhs, rhs,);
+                    }
+                    panic!("could not prove equal {},   {}", lhs, rhs);
+                }
+        }
+    }
 
     #[test]
     fn logical_proves_equal() {
