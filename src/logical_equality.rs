@@ -86,7 +86,7 @@ type EGraph = egg::EGraph<EVM, LogicalAnalysis>;
 
 #[derive(Default, Debug, Clone)]
 pub struct Data {
-    cvec: Vec<U256>,
+    cvec: Option<Vec<U256>>,
     constant: Option<U256>,
 }
 
@@ -119,49 +119,49 @@ impl Analysis<EVM> for LogicalAnalysis {
         let result = match enode {
             EVM::SafeMathNarrow(_) => None,
             _ => {
-                let cvec = vec![];
-
-
-                /*
-                if matches!(enode, EVM::Var(_)) && egraph.analysis.cvec_enabled {
-                        let mut cvec = egraph.analysis.special_constants.clone();
-                        // randomize order of constants
-                        cvec.shuffle(&mut thread_rng());
-                        cvec.extend(egraph.analysis.special_constants.clone());
-                        cvec.extend((0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()));
-                        cvec.truncate(CVEC_LEN);
-                        cvec
-                    } else if egraph.analysis.cvec_enabled {
-                        let get_evec = |child_index, cvec_index| {
-                            let &child = enode.children().get(child_index)?;
-                            egraph[child].data.clone().unwrap().cvec.get(cvec_index).copied()
-                        };
-                        (0..CVEC_LEN)
-                            .map(|cvec_index| (get_evec(0, cvec_index), get_evec(1, cvec_index)))
-                            .map(|(first, second)| {
-                                eval_evm(enode, first, second).unwrap_or_else(|| {
-                                    panic!(
-                                        "eval_evm for {:?} failed, with children {:?} and {:?}",
-                                        enode, first, second
-                                    )
-                                })
-                            })
-                            .collect()
-                    } else {
-                        vec![]
-                    };
-                    */
-                    let get_constant = |index| {
-                        let &child = enode.children().get(index)?;
+                let get_constant = |index| {
+                    let &child = enode.children().get(index)?;
+                    match &egraph[child].data {
+                        None => None,
+                        Some(a) => a.constant,
+                    }
+                };
+                let constant = eval_evm(enode, get_constant(0), get_constant(1));
+                let cvec = if matches!(enode, EVM::Var(_)) && egraph.analysis.cvec_enabled {
+                    let mut cvec = egraph.analysis.special_constants.clone();
+                    // randomize order of constants
+                    cvec.shuffle(&mut thread_rng());
+                    cvec.extend(egraph.analysis.special_constants.clone());
+                    cvec.extend((0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()));
+                    cvec.truncate(CVEC_LEN);
+                    Some(cvec)
+                } else if egraph.analysis.cvec_enabled {
+                    let get_evec = |child_index: usize, cvec_index: usize| {
+                        let &child = enode.children().get(child_index)?;
                         match &egraph[child].data {
                             None => None,
-                            Some(a) => a.constant
+                            Some(a) => match &a.cvec {
+                                None => None,
+                                Some(b) => b.get(cvec_index).copied(),
+                            },
                         }
-                        // egraph[child].data.clone().unwrap().constant
                     };
-                    let constant = eval_evm(enode, get_constant(0), get_constant(1));
-
-                    Some(Data { cvec, constant })
+                    let cvec: Vec<Option<U256>> = (0..CVEC_LEN)
+                        .map(|cvec_index| (get_evec(0, cvec_index), get_evec(1, cvec_index)))
+                        .map(|(first, second)| match (first, second) {
+                            (Some(_), Some(_)) => eval_evm(enode, first, second),
+                            _ => None,
+                        })
+                        .collect();
+                    if cvec.iter().any(|x| x.is_none()) {
+                        None
+                    } else {
+                        Some(cvec.iter().map(|x| x.unwrap()).collect())
+                    }
+                } else {
+                    Some(vec![])
+                };
+                Some(Data { cvec, constant })
             }
         };
         result
@@ -170,19 +170,18 @@ impl Analysis<EVM> for LogicalAnalysis {
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         let mut merge_l = false;
         let mut merge_r = false;
+
         match (to.clone(), from.clone()) {
-            (Some(a), Some(b)) => {
-                match (a.constant, b.constant) {
-                    (None, Some(c)) => {
-                        to.clone().unwrap().constant = Some(c);
-                        merge_l = true;
-                    }
-                    (None, None) => (),
-                    (Some(_), None) => {
-                        merge_r = true;
-                    }
-                    (Some(d), Some(e)) => assert_eq!(d, e),
+            (Some(a), Some(b)) => match (a.constant, b.constant) {
+                (None, Some(c)) => {
+                    to.clone().unwrap().constant = Some(c);
+                    merge_l = true;
                 }
+                (None, None) => (),
+                (Some(_), None) => {
+                    merge_r = true;
+                }
+                (Some(d), Some(e)) => assert_eq!(d, e),
             },
             _ => (),
         }
@@ -192,7 +191,7 @@ impl Analysis<EVM> for LogicalAnalysis {
     fn modify(egraph: &mut EGraph, id: Id) {
         let class = &mut egraph[id];
         match &class.data {
-            None => {},
+            None => {}
             Some(a) => {
                 if let Some(c) = a.constant {
                     let added = egraph.add(EVM::from(c));
@@ -318,12 +317,12 @@ mod tests {
         ];
         for (lhs, rhs) in queries {
             let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
-                if !res.0 {
-                    if res.1 {
-                        panic!("Proved unequal: {} and {}", lhs, rhs,);
-                    }
-                    panic!("could not prove equal {},   {}", lhs, rhs);
+            if !res.0 {
+                if res.1 {
+                    panic!("Proved unequal: {} and {}", lhs, rhs,);
                 }
+                panic!("could not prove equal {},   {}", lhs, rhs);
+            }
         }
     }
 
@@ -335,12 +334,12 @@ mod tests {
         ];
         for (lhs, rhs) in queries {
             let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
-                if !res.0 {
-                    if res.1 {
-                        panic!("Proved unequal: {} and {}", lhs, rhs,);
-                    }
-                    panic!("could not prove equal {},   {}", lhs, rhs);
+            if !res.0 {
+                if res.1 {
+                    panic!("Proved unequal: {} and {}", lhs, rhs,);
                 }
+                panic!("could not prove equal {},   {}", lhs, rhs);
+            }
         }
     }
 
