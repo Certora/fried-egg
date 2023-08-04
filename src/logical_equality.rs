@@ -171,8 +171,8 @@ impl Analysis<EVM> for LogicalAnalysis {
         let mut merge_l = false;
         let mut merge_r = false;
 
-        match (to.clone(), from.clone()) {
-            (Some(a), Some(b)) => match (a.constant, b.constant) {
+        if let (Some(a), Some(b)) = (to.clone(), from.clone()) {
+            match (a.constant, b.constant) {
                 (None, Some(c)) => {
                     to.clone().unwrap().constant = Some(c);
                     merge_l = true;
@@ -182,8 +182,7 @@ impl Analysis<EVM> for LogicalAnalysis {
                     merge_r = true;
                 }
                 (Some(d), Some(e)) => assert_eq!(d, e),
-            },
-            _ => (),
+            }
         }
         DidMerge(merge_l, merge_r)
     }
