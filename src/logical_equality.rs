@@ -47,7 +47,7 @@ pub fn get_pregenerated_rules() -> Vec<(String, String)> {
 
 pub fn start_logical_pair(expr1: String, expr2: String, timeout: u64) -> (bool, bool) {
     if expr1 == expr2 {
-        return (true, true);
+        return (true, false);
     }
     let expr1 = expr1.parse().unwrap();
     let expr2 = expr2.parse().unwrap();
@@ -78,6 +78,8 @@ pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
         .chain([
             rewrite!("distr*+"; "(* (+ ?a ?b) ?c)" => "(+ (* ?a ?c) (* ?b ?c))"),
             rewrite!("doubleneg!=="; "(! (== (== ?x ?y) 0))" => "(== ?x ?y)"),
+            rewrite!("neg"; "(! (! ?a))" => "?a"),
+            rewrite!("gequals"; "(== (> ?a ?b) 0)" => "(== ?a ?b)"),
         ])
         .collect()
 }
@@ -278,7 +280,7 @@ impl LogicalRunner {
         let exprs_check = self.exprs.clone();
         let runner: Runner<EVM, LogicalAnalysis> = Runner::new(LogicalAnalysis::default())
             .with_egraph(self.egraph)
-            .with_node_limit(1_000_000)
+            .with_node_limit(10_000_000)
             .with_time_limit(Duration::from_millis(timeout))
             .with_iter_limit(usize::MAX)
             .with_hook(move |runner| {
@@ -307,6 +309,41 @@ impl LogicalRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn z3_vs_egg() {
+        let queries = vec![
+            ("(== (== tacSighash 3264763256) 0)", "(! (== tacSighash 3264763256))"),
+            // ("(! (== (== 3264763256 tacSighash) 0))", "(== tacSighash 0)"), // changing constant => causes failure
+            ("(! (== (== tacSighash 3264763256) 0))", "(< tacSighash 3264763256)"), // this is fine; we have commutativity rules
+            // ("(< (== (== tacSighash 3264763256) 0) 0)", "(== tacSighash 3264763256)"), // nope
+            // ("(~ (== (== tacSighash 3264763256) 0))", "32"), // nope
+        ];
+        for (lhs, rhs) in queries {
+            let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
+            if !res.0 {
+                if !res.1 {
+                    panic!("could not prove equal or unequal {}, {}", lhs, rhs);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn z3_vs_egg_2() {
+        let queries = vec![
+            ("(! tacSighash)", "(! (! (! tacSighash)))"),
+            // ("(! (== (< (- tacCalldatasize 4) 32) 0))", "(== tacCalldatasize 32)"), // cannot solve
+        ];
+        for (lhs, rhs) in queries {
+            let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
+            if !res.0 {
+                if !res.1 {
+                    panic!("could not prove equal or unequal {}, {}", lhs, rhs);
+                }
+            }
+        }
+    }
 
     #[test]
     fn uninterpreted_test() {
