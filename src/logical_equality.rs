@@ -118,8 +118,26 @@ impl Analysis<EVM> for LogicalAnalysis {
 
     fn make(egraph: &EGraph, enode: &EVM) -> Self::Data {
         // cvecs used for fuzzing in the egraph
-        let result = match enode {
+        match &enode {
             EVM::SafeMathNarrow(_) => None,
+            EVM::SafeMathPromotion(_) => None,
+            EVM::SmulNoOflUdfl(_) => None,
+            EVM::SmulNoudfl(_) => None,
+            EVM::DisjointSighashes(_) => None,
+            EVM::MulNoofl(_) => None,
+            EVM::AddMustOfl(_) => None,
+            EVM::AddNoofl(_) => None,
+            EVM::SkeyAdd(_) => None,
+            EVM::SkeyBasic(_) => None,
+            EVM::Hash(_) => None,
+            EVM::LinkLibrary(_) => None,
+            EVM::OpaqueIdentity(_) => None,
+            EVM::Ecrecover(_) => None,
+            EVM::WrapTwosComplement(_) => None,
+            EVM::UnwrapTwosComplement(_) => None,
+            EVM::ToSkey(_) => None,
+            EVM::FromSkey(_) => None,
+            EVM::ToStorageKey(_) => None,
             _ => {
                 let get_constant = |index| {
                     let &child = enode.children().get(index)?;
@@ -129,44 +147,63 @@ impl Analysis<EVM> for LogicalAnalysis {
                     }
                 };
                 let constant = eval_evm(enode, get_constant(0), get_constant(1));
-                let cvec = if matches!(enode, EVM::Var(_)) && egraph.analysis.cvec_enabled {
-                    let mut cvec = egraph.analysis.special_constants.clone();
-                    // randomize order of constants
-                    cvec.shuffle(&mut thread_rng());
-                    cvec.extend(egraph.analysis.special_constants.clone());
-                    cvec.extend((0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()));
-                    cvec.truncate(CVEC_LEN);
-                    Some(cvec)
-                } else if egraph.analysis.cvec_enabled {
-                    let get_evec = |child_index: usize, cvec_index: usize| {
-                        let &child = enode.children().get(child_index)?;
-                        match &egraph[child].data {
-                            None => None,
-                            Some(a) => match &a.cvec {
-                                None => None,
-                                Some(b) => b.get(cvec_index).copied(),
-                            },
+
+                if egraph.analysis.cvec_enabled {
+                    match &enode {
+                        EVM::Var(_) => {
+                            let mut cvec = egraph.analysis.special_constants.clone();
+                            cvec.shuffle(&mut thread_rng());
+                            cvec.extend(egraph.analysis.special_constants.clone());
+                            cvec.extend(
+                                (0..CVEC_LEN.saturating_sub(cvec.len())).map(|_| random_256()),
+                            );
+                            cvec.truncate(CVEC_LEN);
+                            Some(Data {
+                                cvec: Some(cvec),
+                                constant: constant,
+                            })
                         }
-                    };
-                    let cvec: Vec<Option<U256>> = (0..CVEC_LEN)
-                        .map(|cvec_index| (get_evec(0, cvec_index), get_evec(1, cvec_index)))
-                        .map(|(first, second)| match (first, second) {
-                            (Some(_), Some(_)) => eval_evm(enode, first, second),
-                            _ => None,
-                        })
-                        .collect();
-                    if cvec.iter().any(|x| x.is_none()) {
-                        None
-                    } else {
-                        Some(cvec.iter().map(|x| x.unwrap()).collect())
+                        _ => {
+                            let get_evec = |child_index: usize, cvec_index: usize| {
+                                let &child = enode.children().get(child_index)?;
+                                match &egraph[child].data {
+                                    None => None,
+                                    Some(a) => match &a.cvec {
+                                        None => None,
+                                        Some(b) => b.get(cvec_index).copied(),
+                                    },
+                                }
+                            };
+                            let cvec_optionals: Vec<Option<U256>> = (0..CVEC_LEN)
+                                .map(|cvec_index| {
+                                    (get_evec(0, cvec_index), get_evec(1, cvec_index))
+                                })
+                                .map(|(first, second)| eval_evm(enode, first, second)
+                                )
+                                .collect();
+                            // println!("cvec_optionals: {:?}", cvec_optionals);
+                            if cvec_optionals.iter().any(|x| x.is_none()) {
+                                Some(Data {
+                                    cvec: None,
+                                    constant: constant,
+                                })
+                            } else {
+                                let cvec = cvec_optionals.iter().map(|x| x.unwrap()).collect();
+                                Some(Data {
+                                    cvec: Some(cvec),
+                                    constant: constant,
+                                })
+                            }
+                        }
                     }
                 } else {
-                    Some(vec![])
-                };
-                Some(Data { cvec, constant })
+                    Some(Data {
+                        cvec: None,
+                        constant: constant,
+                    })
+                }
             }
-        };
-        result
+        }
     }
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
@@ -265,9 +302,15 @@ impl LogicalRunner {
         let start_f = self.fuzzing_egraph.add_expr(lhs);
         let end_f = self.fuzzing_egraph.add_expr(rhs);
         self.fuzzing_egraph.rebuild();
-        let leftvec = &self.fuzzing_egraph[start_f].data.clone().unwrap().cvec;
-        let rightvec = &self.fuzzing_egraph[end_f].data.clone().unwrap().cvec;
-        leftvec != rightvec
+
+        let leftvec = &self.fuzzing_egraph[start_f];
+        let rightvec = &self.fuzzing_egraph[end_f];
+
+        if leftvec.data.is_none() || rightvec.data.is_none() {
+            false
+        } else {
+            leftvec.data.clone().unwrap().cvec != rightvec.data.clone().unwrap().cvec
+        }
     }
 
     pub fn are_equal(&mut self, lhs: &RecExpr<EVM>, rhs: &RecExpr<EVM>) -> bool {
@@ -313,11 +356,10 @@ mod tests {
     #[test]
     fn z3_vs_egg() {
         let queries = vec![
-            ("(== (== tacSighash 3264763256) 0)", "(! (== tacSighash 3264763256))"),
-            // ("(! (== (== 3264763256 tacSighash) 0))", "(== tacSighash 0)"), // changing constant => causes failure
-            ("(! (== (== tacSighash 3264763256) 0))", "(< tacSighash 3264763256)"), // this is fine; we have commutativity rules
-            // ("(< (== (== tacSighash 3264763256) 0) 0)", "(== tacSighash 3264763256)"), // nope
-            // ("(~ (== (== tacSighash 3264763256) 0))", "32"), // nope
+            (
+                "(! (== (== tacSighash 3264763256) 0))",
+                "(== tacSighash 3264763256)",
+            ),
         ];
         for (lhs, rhs) in queries {
             let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
