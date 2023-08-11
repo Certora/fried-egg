@@ -79,7 +79,8 @@ pub fn logical_rules() -> Vec<Rewrite<EVM, LogicalAnalysis>> {
             rewrite!("distr*+"; "(* (+ ?a ?b) ?c)" => "(+ (* ?a ?c) (* ?b ?c))"),
             rewrite!("doubleneg!=="; "(! (== (== ?x ?y) 0))" => "(== ?x ?y)"),
             rewrite!("neg"; "(! (! ?a))" => "?a"),
-            rewrite!("gequals"; "(== (> ?a ?b) 0)" => "(== ?a ?b)"),
+            rewrite!("gequals"; "(== (> ?a ?b) 0)" => "(<= ?a ?b)"),
+            rewrite!("notless"; "(>= ?a ?b)" => "(! (< ?a ?b))"),
         ])
         .collect()
 }
@@ -160,7 +161,7 @@ impl Analysis<EVM> for LogicalAnalysis {
                             cvec.truncate(CVEC_LEN);
                             Some(Data {
                                 cvec: Some(cvec),
-                                constant: constant,
+                                constant,
                             })
                         }
                         _ => {
@@ -178,20 +179,19 @@ impl Analysis<EVM> for LogicalAnalysis {
                                 .map(|cvec_index| {
                                     (get_evec(0, cvec_index), get_evec(1, cvec_index))
                                 })
-                                .map(|(first, second)| eval_evm(enode, first, second)
-                                )
+                                .map(|(first, second)| eval_evm(enode, first, second))
                                 .collect();
                             // println!("cvec_optionals: {:?}", cvec_optionals);
                             if cvec_optionals.iter().any(|x| x.is_none()) {
                                 Some(Data {
                                     cvec: None,
-                                    constant: constant,
+                                    constant,
                                 })
                             } else {
                                 let cvec = cvec_optionals.iter().map(|x| x.unwrap()).collect();
                                 Some(Data {
                                     cvec: Some(cvec),
-                                    constant: constant,
+                                    constant,
                                 })
                             }
                         }
@@ -199,7 +199,7 @@ impl Analysis<EVM> for LogicalAnalysis {
                 } else {
                     Some(Data {
                         cvec: None,
-                        constant: constant,
+                        constant,
                     })
                 }
             }
@@ -355,12 +355,10 @@ mod tests {
 
     #[test]
     fn z3_vs_egg() {
-        let queries = vec![
-            (
-                "(! (== (== tacSighash 3264763256) 0))",
-                "(== tacSighash 3264763256)",
-            ),
-        ];
+        let queries = vec![(
+            "(! (== (== tacSighash 3264763256) 0))",
+            "(== tacSighash 3264763256)",
+        )];
         for (lhs, rhs) in queries {
             let res = start_logical_pair(lhs.to_string(), rhs.to_string(), 8000);
             if !res.0 {
