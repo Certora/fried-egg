@@ -26,8 +26,6 @@ commands:
             chmod +x ~/.cargo/bin/cargo-deadlinks
             cargo deadlinks --version
   build_fried_egg:
-    docker:
-      - image: cimg/rust:1.74.1
     steps:
       # Build with caching
       - run: sudo apt-get update && sudo apt-get install -y cmake
@@ -42,6 +40,7 @@ jobs:
   test:
     docker:
       - image: &img certora/cvt-image:29
+      - image: cimg/rust:1.74.1
 
     steps:
       - checkout
