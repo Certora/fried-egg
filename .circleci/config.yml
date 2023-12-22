@@ -40,9 +40,9 @@ jobs:
   test:
     docker:
       - image: &img certora/cvt-image:29
-      - image: cimg/rust:1.74.1
 
     steps:
+      - rustup update
       - checkout
       - build_fried_egg
 
