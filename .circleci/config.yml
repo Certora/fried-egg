@@ -42,12 +42,14 @@ jobs:
       - image: &img certora/cvt-image:29
 
     steps:
-      - rustup update
       - checkout
       - build_fried_egg
 
       # Run tests
-      - run: cargo test --release --all-targets
+      - run:
+          command: |
+            rustup update
+            cargo test --release --all-targets
   
   # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
