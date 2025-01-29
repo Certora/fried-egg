@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# The first argument to this script should be the path to the EVMVerifier/bin directory
+# The first argument to this script should be the path to the CertoraProver/bin directory
 
 cd fried-egg && cargo build --release && cd ../
 
