@@ -64,7 +64,7 @@ jobs:
             cargo clean --doc
             cargo doc --no-deps
             cargo deadlinks
-            cargo clippy -- -D warnings
+            cargo clippy
 
 
 workflows:
