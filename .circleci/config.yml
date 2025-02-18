@@ -37,7 +37,7 @@ commands:
 jobs:
   test:
     docker:
-      - image: &cvt public.ecr.aws/certora/cvt-image:2025.01.19-4721-954515d
+      - image: &rust rust:1.84
     steps:
       - checkout
       - build_fried_egg
@@ -51,7 +51,7 @@ jobs:
   # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
     docker:
-      - image: *cvt
+      - image: *rust
     steps:
       - checkout
       - build_fried_egg
