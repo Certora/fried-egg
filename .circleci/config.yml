@@ -38,7 +38,6 @@ jobs:
   test:
     docker:
       - image: &cvt public.ecr.aws/certora/cvt-image:2025.01.19-4721-954515d
-
     steps:
       - checkout
       - build_fried_egg
@@ -53,12 +52,10 @@ jobs:
   nits:
     docker:
       - image: *cvt
-
     steps:
       - checkout
       - build_fried_egg
       - install_cargo_deadlinks
-
       - run:
           name: check nits using clippy and deadlinks
           command: |
