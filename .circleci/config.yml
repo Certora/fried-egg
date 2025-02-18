@@ -32,14 +32,12 @@ commands:
       - restore_sccache_cache
       - run: cargo build --release
       - save_sccache_cache
-      
-  
 
 
 jobs:
   test:
     docker:
-      - image: &img certora/cvt-image:29
+      - image: &cvt public.ecr.aws/certora/cvt-image:2025.01.19-4721-954515d
 
     steps:
       - checkout
@@ -54,7 +52,7 @@ jobs:
   # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
     docker:
-      - image: &img certora/cvt-image:29
+      - image: *cvt
 
     steps:
       - checkout
@@ -74,9 +72,7 @@ jobs:
 
 
 workflows:
-  version: 2
   build-test:
     jobs:
       - test
       - nits
-    
