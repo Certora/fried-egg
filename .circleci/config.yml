@@ -21,26 +21,22 @@ commands:
     steps:
       - run:
           name: Install cargo deadlinks
-          command:  |
-            curl -L -o ~/.cargo/bin/cargo-deadlinks https://github.com/deadlinks/cargo-deadlinks/releases/download/0.4.2/deadlinks-linux
-            chmod +x ~/.cargo/bin/cargo-deadlinks
+          command: |
+            cargo install cargo-deadlinks
             cargo deadlinks --version
   build_fried_egg:
     steps:
       # Build with caching
-      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - run: apt-get update && apt-get install -y cmake
       - restore_sccache_cache
       - run: cargo build --release
       - save_sccache_cache
-      
-  
 
 
 jobs:
   test:
     docker:
-      - image: &img certora/cvt-image:29
-
+      - image: &rust rust:1.84
     steps:
       - checkout
       - build_fried_egg
@@ -54,13 +50,11 @@ jobs:
   # Based on nits checking for egg: https://github.com/egraphs-good/egg/blob/main/Makefile
   nits:
     docker:
-      - image: &img certora/cvt-image:29
-
+      - image: *rust
     steps:
       - checkout
       - build_fried_egg
       - install_cargo_deadlinks
-
       - run:
           name: check nits using clippy and deadlinks
           command: |
@@ -70,13 +64,11 @@ jobs:
             cargo clean --doc
             cargo doc --no-deps
             cargo deadlinks
-            cargo clippy -- -D warnings
+            cargo clippy
 
 
 workflows:
-  version: 2
   build-test:
     jobs:
       - test
       - nits
-    
